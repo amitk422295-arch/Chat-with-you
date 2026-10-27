@@ -18,21 +18,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.chatarena.ChatItem // Imported from Models.kt
 import com.chatarena.ui.auth.BgColor
 import com.chatarena.ui.auth.CardColor
 import com.chatarena.ui.auth.DangerRed
 import com.chatarena.ui.auth.PrimaryBlue
 import com.chatarena.ui.auth.SubTextColor
 import com.chatarena.ui.auth.TextColor
-
-data class ChatItem(
-    val type: String, // "user" or "group"
-    val id: String,
-    val name: String,
-    val avatarUrl: String?,
-    val subtitle: String,
-    val unreadCount: Int = 0
-)
 
 @Composable
 fun ChatListScreen(
