@@ -17,7 +17,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
-import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset // यह लाइन जोड़ी गई
+import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -39,14 +39,13 @@ import kotlin.random.Random
 fun MainAppScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    // pageCount के साथ initialPage सेट किया गया है
     val pagerState = rememberPagerState(initialPage = 0, pageCount = { 3 })
 
     var showAIModal by remember { mutableStateOf(false) }
     var showSettingsModal by remember { mutableStateOf(false) }
     var showCreateGroup by remember { mutableStateOf(false) }
 
-    // यहाँ एरर था जिसे ठीक कर दिया गया है (सबको 5 पैरामीटर और String ("") बना दिया है)
+    // यहाँ एरर था जिसे ठीक कर दिया गया है (सबको String ("") बना दिया है)
     val mockChatList = listOf(
         ChatItem("group", "g1", "Developers", "5 members", "0"),
         ChatItem("user", "u1", "John Doe", "john_123", "2"),
@@ -138,7 +137,6 @@ fun MainAppScreen() {
         }
 
         if (showCreateGroup) {
-            // Yahan CreateGroupScreen aayega, abhi ke liye placeholder
             PlaceholderModal(title = "Create Group", onClose = { showCreateGroup = false })
         }
     }
@@ -252,7 +250,6 @@ fun AIModalScreen(onClose: () -> Unit) {
                             if (promptText.isNotBlank()) {
                                 messages.add(AIMessage(Random.nextInt().toString(), promptText, true))
                                 promptText = ""
-                                // TODO: API call to /api/ai/chat
                             }
                         }
                     ) {
@@ -264,9 +261,60 @@ fun AIModalScreen(onClose: () -> Unit) {
     }
 }
 
+// AlertDialog को सुरक्षित Dialog से रिप्लेस कर दिया है
 @Composable
 fun SettingsModal(email: String, onClose: () -> Unit, onLogout: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onClose,
-        containerColor = CardColor,
-        
+    Dialog(onDismissRequest = onClose) {
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = CardColor,
+            shadowElevation = 8.dp
+        ) {
+            Column(modifier = Modifier.padding(24.dp)) {
+                Text("Settings", color = TextColor, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(16.dp))
+                Text("Logged in as:\n$email", color = SubTextColor, fontSize = 14.sp)
+                Spacer(modifier = Modifier.height(24.dp))
+                Button(
+                    onClick = onLogout,
+                    colors = ButtonDefaults.buttonColors(containerColor = DangerRed),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("🚪 Log Out", color = Color.White)
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                TextButton(
+                    onClick = onClose,
+                    modifier = Modifier.align(Alignment.End)
+                ) {
+                    Text("Close", color = PrimaryBlue)
+                }
+            }
+        }
+    }
+}
+
+// यहाँ भी सुरक्षित Dialog लगा दिया है
+@Composable
+fun PlaceholderModal(title: String, onClose: () -> Unit) {
+    Dialog(onDismissRequest = onClose) {
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = CardColor,
+            shadowElevation = 8.dp
+        ) {
+            Column(modifier = Modifier.padding(24.dp)) {
+                Text(title, color = TextColor, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(16.dp))
+                Text("This feature is under construction.", color = SubTextColor, fontSize = 14.sp)
+                Spacer(modifier = Modifier.height(24.dp))
+                TextButton(
+                    onClick = onClose,
+                    modifier = Modifier.align(Alignment.End)
+                ) {
+                    Text("OK", color = PrimaryBlue)
+                }
+            }
+        }
+    }
+}
