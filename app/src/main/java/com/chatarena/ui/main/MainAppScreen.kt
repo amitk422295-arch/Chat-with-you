@@ -17,6 +17,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
+import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset // यह लाइन जोड़ी गई
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -38,7 +39,8 @@ import kotlin.random.Random
 fun MainAppScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val pagerState = rememberPagerState(pageCount = { 3 })
+    // pageCount के साथ initialPage सेट किया गया है
+    val pagerState = rememberPagerState(initialPage = 0, pageCount = { 3 })
 
     var showAIModal by remember { mutableStateOf(false) }
     var showSettingsModal by remember { mutableStateOf(false) }
