@@ -16,7 +16,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -40,14 +39,14 @@ fun CameraScreen(
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    
-    // Camera State
+
+    // Permission State
     var hasCameraPermission by remember {
         mutableStateOf(
             ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
         )
     }
-    
+
     val cameraProviderFuture = remember { ProcessCameraProvider.getInstance(context) }
     var imageCapture by remember { mutableStateOf<ImageCapture?>(null) }
 
@@ -57,11 +56,12 @@ fun CameraScreen(
     ) { isGranted ->
         hasCameraPermission = isGranted
         if (!isGranted) {
-            Toast.makeText(context, "Camera permission is required", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "Camera permission is required to take photos", Toast.LENGTH_SHORT).show()
             onClose()
         }
     }
 
+    // Permission maango jab screen khule
     LaunchedEffect(Unit) {
         if (!hasCameraPermission) {
             permissionLauncher.launch(Manifest.permission.CAMERA)
@@ -70,21 +70,21 @@ fun CameraScreen(
 
     if (hasCameraPermission) {
         Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
-            
-            // Camera Preview
+
+            // 1. Camera Preview (Native View)
             AndroidView(
                 factory = { ctx ->
                     val previewView = PreviewView(ctx).apply {
                         scaleType = PreviewView.ScaleType.FILL_CENTER
                     }
-                    
+
                     cameraProviderFuture.addListener({
                         val cameraProvider = cameraProviderFuture.get()
-                        
+
                         val preview = Preview.Builder().build().also {
                             it.setSurfaceProvider(previewView.surfaceProvider)
                         }
-                        
+
                         imageCapture = ImageCapture.Builder()
                             .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
                             .build()
@@ -98,31 +98,31 @@ fun CameraScreen(
                                 imageCapture
                             )
                         } catch (e: Exception) {
-                            Toast.makeText(context, "Failed to start camera: ${e.message}", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "Camera Error: ${e.message}", Toast.LENGTH_SHORT).show()
                         }
                     }, ContextCompat.getMainExecutor(ctx))
-                    
+
                     previewView
                 },
                 modifier = Modifier.fillMaxSize()
             )
 
-            // Top Close Button (Neumorphic Style)
+            // 2. Close Button (Top Left - Neumorphic Glass Effect)
             Box(
                 modifier = Modifier
                     .align(Alignment.TopStart)
                     .padding(top = 48.dp, start = 24.dp)
                     .size(48.dp)
-                    .shadow(8.dp, CircleShape, ambientColor = Color.White.copy(0.5f), spotColor = Color.Black)
+                    .shadow(8.dp, CircleShape, ambientColor = Color.White.copy(0.3f), spotColor = Color.Black)
                     .clip(CircleShape)
-                    .background(Color(0xCCE0E5EC))
+                    .background(Color(0xCCE0E5EC)) // Tera global CSS background color with opacity
                     .clickable { onClose() },
                 contentAlignment = Alignment.Center
             ) {
                 Text("✕", fontSize = 20.sp, color = Color(0xFF2D3748), fontWeight = FontWeight.Bold)
             }
 
-            // Bottom Capture Button (Neumorphic Ring)
+            // 3. Capture Button (Bottom Center - Neumorphic Ring)
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
@@ -130,16 +130,16 @@ fun CameraScreen(
                     .size(80.dp)
                     .shadow(12.dp, CircleShape, ambientColor = Color.White, spotColor = Color(0xFFA3B1C6))
                     .clip(CircleShape)
-                    .background(Color(0xFFE0E5EC))
+                    .background(Color(0xFFE0E5EC)) // Tera base color
                     .clickable {
                         takePhoto(context, imageCapture, onPhotoCaptured)
                     },
                 contentAlignment = Alignment.Center
             ) {
-                // Inner Blue Circle
+                // Inner Blue Circle (Shutter)
                 Box(
                     modifier = Modifier
-                        .size(60.dp)
+                        .size(58.dp)
                         .background(Color(0xFF007AFF), CircleShape)
                 )
             }
@@ -147,7 +147,7 @@ fun CameraScreen(
     }
 }
 
-// Photo Click Logic
+// Photo Capture Logic
 private fun takePhoto(
     context: android.content.Context,
     imageCapture: ImageCapture?,
@@ -155,9 +155,9 @@ private fun takePhoto(
 ) {
     val imageCapture = imageCapture ?: return
 
-    // Create file to save photo
+    // Temporary file banate hain photo save karne ke liye
     val photoFile = File(context.externalCacheDir, "ChatArena_${System.currentTimeMillis()}.jpg")
-    
+
     val outputOptions = ImageCapture.OutputFileOptions.Builder(photoFile).build()
 
     imageCapture.takePicture(
