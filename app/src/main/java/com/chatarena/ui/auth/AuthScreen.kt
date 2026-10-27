@@ -24,6 +24,10 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.chatarena.network.OTPRequest
+import com.chatarena.network.RetrofitClient
+import com.chatarena.network.VerifyRequest
+import kotlinx.coroutines.launch
 
 // Colors
 val BgColor = Color(0xFFDDE3ED)
@@ -36,8 +40,9 @@ val DangerRed = Color(0xFFFF3B5C)
 @Composable
 fun AuthScreen(onLoginSuccess: () -> Unit = {}) {
     val context = LocalContext.current
-    // Keyboard hatane ke liye Focus Manager
     val focusManager = LocalFocusManager.current
+    // API call ke liye Coroutine Scope
+    val scope = rememberCoroutineScope()
 
     var email by remember { mutableStateOf("") }
     var otp by remember { mutableStateOf("") }
@@ -56,10 +61,29 @@ fun AuthScreen(onLoginSuccess: () -> Unit = {}) {
         if (clean.isEmpty() || !Regex("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$").matches(clean)) {
             toast("Please enter a valid Email ID"); return
         }
+        
         isLoading = true; buttonText = "Sending... ⏳"
-        // TODO: POST /api/auth/send-otp
-        isLoading = false; showOtpBox = true; buttonText = "Resend OTP"
-        toast("Access Code sent to your email!")
+        
+        scope.launch {
+            try {
+                // REAL API CALL TO GO BACKEND
+                val response = RetrofitClient.apiService.sendOtp(OTPRequest(clean))
+                
+                if (response.isSuccessful && response.body()?.success == true) {
+                    showOtpBox = true
+                    buttonText = "Resend OTP"
+                    toast(response.body()?.message ?: "Access Code sent to your email!")
+                } else {
+                    buttonText = "Send OTP"
+                    toast(response.body()?.error ?: "Failed to send OTP. Check Email.")
+                }
+            } catch (e: Exception) {
+                buttonText = "Send OTP"
+                toast("Network Error: ${e.message}")
+            } finally {
+                isLoading = false
+            }
+        }
     }
 
     fun validateAuthOTP() {
@@ -67,10 +91,28 @@ fun AuthScreen(onLoginSuccess: () -> Unit = {}) {
         if (cleanOtp.length != 6 || !Regex("^\\d{6}$").matches(cleanOtp)) {
             toast("Please enter the 6-digit code"); return
         }
+        
         isLoading = true
-        // TODO: POST /api/auth/verify-otp
-        isLoading = false
-        isProfileSetup = true
+        
+        scope.launch {
+            try {
+                // REAL API CALL TO GO BACKEND
+                val response = RetrofitClient.apiService.verifyOtp(
+                    VerifyRequest(email = email.trim().lowercase(), code = cleanOtp)
+                )
+                
+                if (response.isSuccessful && response.body()?.success == true) {
+                    isProfileSetup = true
+                    // Yahan tu chahe toh token save kar sakta hai: response.body()?.chatToken
+                } else {
+                    toast(response.body()?.error ?: "Incorrect OTP")
+                }
+            } catch (e: Exception) {
+                toast("Network Error: ${e.message}")
+            } finally {
+                isLoading = false
+            }
+        }
     }
 
     fun submitProfileSetup() {
@@ -78,11 +120,14 @@ fun AuthScreen(onLoginSuccess: () -> Unit = {}) {
         val cleanDigits = setupMobile.replace(Regex("\\D"), "")
         if (cleanName.isEmpty()) { toast("Please enter your Full Name"); return }
         if (cleanDigits.length != 10) { toast("Please enter a valid 10-digit mobile number"); return }
+        
         isLoading = true
-        // TODO: POST /api/auth/update-profile
+        
+        // Abhi ke liye Profile setup ko local hi rakha hai, 
+        // API (/api/auth/update-profile) agle step me lagayenge jab token save hoga.
         isLoading = false
         isProfileSetup = false
-        toast("Profile saved!")
+        toast("Profile saved! (Local only for now)")
         onLoginSuccess()
     }
 
@@ -90,17 +135,14 @@ fun AuthScreen(onLoginSuccess: () -> Unit = {}) {
         modifier = Modifier
             .fillMaxSize()
             .background(BgColor)
-            // यहाँ मेन फिक्स है: कीबोर्ड और स्टेटस बार को सही से एडजस्ट करने के लिए
             .windowInsetsPadding(WindowInsets.safeDrawing)
             .pointerInput(Unit) {
-                // Bahar click karne par keyboard band karne ka logic
                 detectTapGestures(onTap = {
                     focusManager.clearFocus()
                 })
             },
         contentAlignment = Alignment.Center
     ) {
-        // अगर स्क्रीन छोटी है या कीबोर्ड बहुत ऊपर आता है, तो स्क्रॉल हो सके इसलिए Column में डाला
         Column(
             modifier = Modifier
                 .fillMaxWidth()
