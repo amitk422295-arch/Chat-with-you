@@ -3,6 +3,7 @@ package com.chatarena.ui.auth
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -12,7 +13,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -31,6 +34,8 @@ val DangerRed = Color(0xFFFF3B5C)
 @Composable
 fun AuthScreen(onLoginSuccess: () -> Unit = {}) {
     val context = LocalContext.current
+    // Keyboard hatane ke liye Focus Manager
+    val focusManager = LocalFocusManager.current
 
     var email by remember { mutableStateOf("") }
     var otp by remember { mutableStateOf("") }
@@ -80,7 +85,16 @@ fun AuthScreen(onLoginSuccess: () -> Unit = {}) {
     }
 
     Box(
-        modifier = Modifier.fillMaxSize().background(BgColor).padding(24.dp),
+        modifier = Modifier
+            .fillMaxSize()
+            .background(BgColor)
+            .pointerInput(Unit) {
+                // Bahar click karne par keyboard band karne ka logic
+                detectTapGestures(onTap = {
+                    focusManager.clearFocus()
+                })
+            }
+            .padding(24.dp),
         contentAlignment = Alignment.Center
     ) {
         if (!isProfileSetup) {
