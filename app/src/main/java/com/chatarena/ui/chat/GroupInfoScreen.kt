@@ -52,9 +52,9 @@ fun GroupInfoScreen(
     var showTransferModal by remember { mutableStateOf(false) }
     var selectedTransferCode by remember { mutableStateOf<String?>(null) }
 
-    // Derived state (Safe toString conversion)
+    // Derived state (Safe toString conversion explicitly naming parameters)
     val adminsList = remember(currentGroup) {
-        if (currentGroup.admins.isNotEmpty()) currentGroup.admins.map { it.toString() } 
+        if (currentGroup.admins.isNotEmpty()) currentGroup.admins.map { admin -> admin.toString() } 
         else if (currentGroup.adminCode != null) listOf(currentGroup.adminCode.toString()) 
         else emptyList()
     }
@@ -62,18 +62,19 @@ fun GroupInfoScreen(
     val isLastAdmin = isAdmin && adminsList.size == 1
     val members = currentGroup.members
 
-    // Filter contacts
+    // Filter contacts explicitly using 'contact' instead of 'it' to avoid confusion
     val availableContacts = remember(searchQuery, contactsList, members) {
-        contactsList.filter {
-            it.userCode != currentUserCode &&
-            !members.map { m -> m.toString() }.contains(it.userCode) &&
-            (searchQuery.isBlank() || it.name.contains(searchQuery, true) || it.userCode.contains(searchQuery, true))
+        val memberStrList = members.map { m -> m.toString() }
+        contactsList.filter { contact ->
+            contact.userCode != currentUserCode &&
+            !memberStrList.contains(contact.userCode) &&
+            (searchQuery.isBlank() || contact.name.contains(searchQuery, true) || contact.userCode.contains(searchQuery, true))
         }
     }
 
     fun getMemberInfo(code: String): Contact {
         if (code == currentUserCode) return Contact(code, "You", null, "Online")
-        return contactsList.find { it.userCode == code } ?: Contact(code, code, null, "Hey there!")
+        return contactsList.find { c -> c.userCode == code } ?: Contact(code, code, null, "Hey there!")
     }
 
     fun formatDate(ts: Long): String {
@@ -116,7 +117,7 @@ fun GroupInfoScreen(
                         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
                             BasicTextField(
                                 value = editedName,
-                                onValueChange = { if (it.length <= 50) editedName = it },
+                                onValueChange = { newName -> if (newName.length <= 50) editedName = newName },
                                 textStyle = TextStyle(fontSize = 18.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, color = TextColor),
                                 modifier = Modifier.weight(1f, fill = false).padding(bottom = 4.dp)
                             )
@@ -187,7 +188,7 @@ fun GroupInfoScreen(
                                 Spacer(modifier = Modifier.width(8.dp))
                                 BasicTextField(
                                     value = searchQuery,
-                                    onValueChange = { searchQuery = it },
+                                    onValueChange = { q -> searchQuery = q },
                                     modifier = Modifier.padding(vertical = 12.dp).weight(1f),
                                     decorationBox = { inner ->
                                         if (searchQuery.isEmpty()) Text("Search contacts...", color = SubTextColor, fontSize = 13.sp)
@@ -205,7 +206,7 @@ fun GroupInfoScreen(
                                     items(availableContacts) { contact ->
                                         Row(
                                             modifier = Modifier.fillMaxWidth().clickable {
-                                                currentGroup = currentGroup.copy(members = members + contact.userCode as Any)
+                                                currentGroup = currentGroup.copy(members = members + contact.userCode)
                                                 onGroupUpdated(currentGroup)
                                                 showAddMember = false
                                             }.padding(8.dp),
@@ -226,7 +227,7 @@ fun GroupInfoScreen(
                 }
             }
 
-            // Members List (Safe toString conversion)
+            // Members List
             items(members) { rawMemberCode ->
                 val memberCode = rawMemberCode.toString()
                 val info = getMemberInfo(memberCode)
@@ -300,7 +301,7 @@ fun GroupInfoScreen(
         }
     }
 
-    // Leave Dialog (Replaced AlertDialog with safe Dialog)
+    // Leave Dialog
     if (showLeaveDialog) {
         Dialog(onDismissRequest = { showLeaveDialog = false }) {
             Surface(
@@ -323,7 +324,7 @@ fun GroupInfoScreen(
         }
     }
 
-    // Transfer Admin Dialog (Safe toString conversion)
+    // Transfer Admin Dialog explicitly naming parameters
     if (showTransferModal) {
         Dialog(onDismissRequest = { showTransferModal = false }) {
             Surface(shape = RoundedCornerShape(20.dp), color = CardColor) {
@@ -331,9 +332,10 @@ fun GroupInfoScreen(
                     Text("Transfer Admin & Leave", color = PrimaryBlue, fontSize = 17.sp, fontWeight = FontWeight.Bold)
                     Text("You are the last admin. Please choose the next admin before leaving.", color = SubTextColor, fontSize = 12.sp, modifier = Modifier.padding(vertical = 8.dp))
                     
+                    val transferableMembers = members.map { m -> m.toString() }.filter { memberCode -> memberCode != currentUserCode }
+                    
                     LazyColumn(modifier = Modifier.weight(1f, fill = false).heightIn(max = 250.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(members.filter { it.toString() != currentUserCode }) { rawCode ->
-                            val code = rawCode.toString()
+                        items(transferableMembers) { code ->
                             val info = getMemberInfo(code)
                             Row(
                                 modifier = Modifier.fillMaxWidth().background(if (selectedTransferCode == code) PrimaryBlue.copy(alpha = 0.1f) else BgColor, RoundedCornerShape(12.dp)).clickable { selectedTransferCode = code }.padding(12.dp),
