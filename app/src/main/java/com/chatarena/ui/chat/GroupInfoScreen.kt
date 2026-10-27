@@ -52,10 +52,10 @@ fun GroupInfoScreen(
     var showTransferModal by remember { mutableStateOf(false) }
     var selectedTransferCode by remember { mutableStateOf<String?>(null) }
 
-    // Derived state
+    // Derived state (Safe toString conversion)
     val adminsList = remember(currentGroup) {
-        if (currentGroup.admins.isNotEmpty()) currentGroup.admins 
-        else if (currentGroup.adminCode != null) listOf(currentGroup.adminCode) 
+        if (currentGroup.admins.isNotEmpty()) currentGroup.admins.map { it.toString() } 
+        else if (currentGroup.adminCode != null) listOf(currentGroup.adminCode.toString()) 
         else emptyList()
     }
     val isAdmin = adminsList.contains(currentUserCode)
@@ -66,7 +66,7 @@ fun GroupInfoScreen(
     val availableContacts = remember(searchQuery, contactsList, members) {
         contactsList.filter {
             it.userCode != currentUserCode &&
-            !members.contains(it.userCode) &&
+            !members.map { m -> m.toString() }.contains(it.userCode) &&
             (searchQuery.isBlank() || it.name.contains(searchQuery, true) || it.userCode.contains(searchQuery, true))
         }
     }
@@ -205,7 +205,7 @@ fun GroupInfoScreen(
                                     items(availableContacts) { contact ->
                                         Row(
                                             modifier = Modifier.fillMaxWidth().clickable {
-                                                currentGroup = currentGroup.copy(members = members + contact.userCode)
+                                                currentGroup = currentGroup.copy(members = members + contact.userCode as Any)
                                                 onGroupUpdated(currentGroup)
                                                 showAddMember = false
                                             }.padding(8.dp),
@@ -226,8 +226,9 @@ fun GroupInfoScreen(
                 }
             }
 
-            // Members List
-            items(members) { memberCode ->
+            // Members List (Safe toString conversion)
+            items(members) { rawMemberCode ->
+                val memberCode = rawMemberCode.toString()
                 val info = getMemberInfo(memberCode)
                 val isMemberAdmin = adminsList.contains(memberCode)
                 
@@ -262,7 +263,7 @@ fun GroupInfoScreen(
                             Icon(
                                 Icons.Default.Close, contentDescription = "Remove", tint = DangerRed, 
                                 modifier = Modifier.size(22.dp).clickable { 
-                                    currentGroup = currentGroup.copy(members = members - memberCode)
+                                    currentGroup = currentGroup.copy(members = members - rawMemberCode)
                                     onGroupUpdated(currentGroup)
                                 }.padding(2.dp)
                             )
@@ -299,20 +300,30 @@ fun GroupInfoScreen(
         }
     }
 
-    // Leave Dialog
+    // Leave Dialog (Replaced AlertDialog with safe Dialog)
     if (showLeaveDialog) {
-        AlertDialog(
-            onDismissRequest = { showLeaveDialog = false },
-            title = { Text("Leave Group?") },
-            text = { Text("Are you sure you want to leave this group? You will not be able to read new messages.") },
-            confirmButton = {
-                TextButton(onClick = { showLeaveDialog = false; onClose() }) { Text("Leave", color = DangerRed) }
-            },
-            dismissButton = { TextButton(onClick = { showLeaveDialog = false }) { Text("Cancel", color = PrimaryBlue) } }
-        )
+        Dialog(onDismissRequest = { showLeaveDialog = false }) {
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = CardColor,
+                shadowElevation = 8.dp
+            ) {
+                Column(modifier = Modifier.padding(24.dp)) {
+                    Text("Leave Group?", color = TextColor, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text("Are you sure you want to leave this group? You will not be able to read new messages.", color = SubTextColor, fontSize = 14.sp)
+                    Spacer(modifier = Modifier.height(24.dp))
+                    Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                        TextButton(onClick = { showLeaveDialog = false }) { Text("Cancel", color = PrimaryBlue) }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        TextButton(onClick = { showLeaveDialog = false; onClose() }) { Text("Leave", color = DangerRed) }
+                    }
+                }
+            }
+        }
     }
 
-    // Transfer Admin Dialog
+    // Transfer Admin Dialog (Safe toString conversion)
     if (showTransferModal) {
         Dialog(onDismissRequest = { showTransferModal = false }) {
             Surface(shape = RoundedCornerShape(20.dp), color = CardColor) {
@@ -321,7 +332,8 @@ fun GroupInfoScreen(
                     Text("You are the last admin. Please choose the next admin before leaving.", color = SubTextColor, fontSize = 12.sp, modifier = Modifier.padding(vertical = 8.dp))
                     
                     LazyColumn(modifier = Modifier.weight(1f, fill = false).heightIn(max = 250.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(members.filter { it != currentUserCode }) { code ->
+                        items(members.filter { it.toString() != currentUserCode }) { rawCode ->
+                            val code = rawCode.toString()
                             val info = getMemberInfo(code)
                             Row(
                                 modifier = Modifier.fillMaxWidth().background(if (selectedTransferCode == code) PrimaryBlue.copy(alpha = 0.1f) else BgColor, RoundedCornerShape(12.dp)).clickable { selectedTransferCode = code }.padding(12.dp),
