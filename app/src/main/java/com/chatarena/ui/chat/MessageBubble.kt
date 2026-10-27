@@ -2,6 +2,7 @@ package com.chatarena.ui.chat
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
@@ -206,11 +207,5 @@ fun MessageBubble(
                 }
             }
         }
-
-        // Reactions (Placeholder)
-        // Agar message.reactions me data ho toh yahan Row banayenge
     }
 }
-
-// Helper Modifier clickable import
-import androidx.compose.foundation.clickable
