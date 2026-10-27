@@ -52,30 +52,32 @@ fun GroupInfoScreen(
     var showTransferModal by remember { mutableStateOf(false) }
     var selectedTransferCode by remember { mutableStateOf<String?>(null) }
 
-    // साफ़ तौर पर List<String> बता दिया गया है ताकि मशीन कन्फ्यूज़ न हो
+    // सबसे ऊपर ही सारे डेटा को पक्के String Format में बदल दिया, ताकि मशीन आगे कन्फ्यूज़ न हो
     val adminsList: List<String> = remember(currentGroup) {
-        if (currentGroup.admins.isNotEmpty()) currentGroup.admins.map { admin -> admin.toString() } 
+        if (currentGroup.admins.isNotEmpty()) currentGroup.admins.map { it.toString() } 
         else if (currentGroup.adminCode != null) listOf(currentGroup.adminCode.toString()) 
         else emptyList()
     }
     
+    val memberStrings: List<String> = remember(currentGroup) {
+        currentGroup.members.map { it.toString() }
+    }
+
     val isAdmin = adminsList.contains(currentUserCode)
     val isLastAdmin = isAdmin && adminsList.size == 1
-    val members = currentGroup.members
 
-    // यहाँ साफ़ तौर पर List<Contact> बताया गया है जिससे line 216 और 219 का name वाला एरर सॉल्व होगा
-    val availableContacts: List<Contact> = remember(searchQuery, contactsList, members) {
-        val memberStrList = members.map { m -> m.toString() }
+    // साफ़ तौर पर List<Contact> बताया है
+    val availableContacts: List<Contact> = remember(searchQuery, contactsList, memberStrings) {
         contactsList.filter { contact ->
             contact.userCode != currentUserCode &&
-            !memberStrList.contains(contact.userCode) &&
+            !memberStrings.contains(contact.userCode) &&
             (searchQuery.isBlank() || contact.name.contains(searchQuery, true) || contact.userCode.contains(searchQuery, true))
         }
     }
 
     fun getMemberInfo(code: String): Contact {
         if (code == currentUserCode) return Contact(code, "You", null, "Online")
-        return contactsList.find { c -> c.userCode == code } ?: Contact(code, code, null, "Hey there!")
+        return contactsList.find { it.userCode == code } ?: Contact(code, code, null, "Hey there!")
     }
 
     fun formatDate(ts: Long): String {
@@ -148,7 +150,7 @@ fun GroupInfoScreen(
 
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        "${members.size} members • ${adminsList.size} admins • Created ${formatDate(currentGroup.createdAt)}",
+                        "${memberStrings.size} members • ${adminsList.size} admins • Created ${formatDate(currentGroup.createdAt)}",
                         color = SubTextColor, fontSize = 12.sp
                     )
                 }
@@ -162,7 +164,7 @@ fun GroupInfoScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("MEMBERS (${members.size})", color = SubTextColor, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text("MEMBERS (${memberStrings.size})", color = SubTextColor, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     if (isAdmin) {
                         Button(
                             onClick = { showAddMember = !showAddMember },
@@ -204,10 +206,12 @@ fun GroupInfoScreen(
                                 Text("No match found.", color = SubTextColor, fontSize = 12.sp, modifier = Modifier.padding(10.dp))
                             } else {
                                 LazyColumn {
-                                    items(availableContacts) { contact ->
+                                    // यहाँ साफ़-साफ़ Type 'Contact' बता दिया
+                                    items(availableContacts) { contact: Contact ->
                                         Row(
                                             modifier = Modifier.fillMaxWidth().clickable {
-                                                currentGroup = currentGroup.copy(members = members + contact.userCode)
+                                                val updatedMembers = currentGroup.members + contact.userCode
+                                                currentGroup = currentGroup.copy(members = updatedMembers)
                                                 onGroupUpdated(currentGroup)
                                                 showAddMember = false
                                             }.padding(8.dp),
@@ -229,8 +233,8 @@ fun GroupInfoScreen(
             }
 
             // Members List
-            items(members) { rawMemberCode ->
-                val memberCode = rawMemberCode.toString()
+            // यहाँ साफ़-साफ़ Type 'String' बता दिया
+            items(memberStrings) { memberCode: String ->
                 val info = getMemberInfo(memberCode)
                 val isMemberAdmin = adminsList.contains(memberCode)
                 
@@ -254,7 +258,7 @@ fun GroupInfoScreen(
                         Spacer(modifier = Modifier.width(8.dp))
                     }
 
-                    // Action Buttons (Make Admin, Remove, etc)
+                    // Action Buttons
                     if (isAdmin && memberCode != currentUserCode) {
                         if (!isMemberAdmin) {
                             Icon(
@@ -265,7 +269,9 @@ fun GroupInfoScreen(
                             Icon(
                                 Icons.Default.Close, contentDescription = "Remove", tint = DangerRed, 
                                 modifier = Modifier.size(22.dp).clickable { 
-                                    currentGroup = currentGroup.copy(members = members - rawMemberCode)
+                                    // Safe removal using strict string checking
+                                    val updatedMembers = currentGroup.members.filter { it.toString() != memberCode }
+                                    currentGroup = currentGroup.copy(members = updatedMembers)
                                     onGroupUpdated(currentGroup)
                                 }.padding(2.dp)
                             )
@@ -325,7 +331,7 @@ fun GroupInfoScreen(
         }
     }
 
-    // Transfer Admin Dialog (यहाँ it हटाकर m -> m.toString() कर दिया गया है)
+    // Transfer Admin Dialog
     if (showTransferModal) {
         Dialog(onDismissRequest = { showTransferModal = false }) {
             Surface(shape = RoundedCornerShape(20.dp), color = CardColor) {
@@ -333,9 +339,11 @@ fun GroupInfoScreen(
                     Text("Transfer Admin & Leave", color = PrimaryBlue, fontSize = 17.sp, fontWeight = FontWeight.Bold)
                     Text("You are the last admin. Please choose the next admin before leaving.", color = SubTextColor, fontSize = 12.sp, modifier = Modifier.padding(vertical = 8.dp))
                     
+                    val transferableMembers: List<String> = memberStrings.filter { it != currentUserCode }
+                    
                     LazyColumn(modifier = Modifier.weight(1f, fill = false).heightIn(max = 250.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(members.filter { m -> m.toString() != currentUserCode }) { rawCode ->
-                            val code = rawCode.toString() 
+                        // यहाँ साफ़-साफ़ Type 'String' बता दिया
+                        items(transferableMembers) { code: String ->
                             val info = getMemberInfo(code)
                             Row(
                                 modifier = Modifier.fillMaxWidth().background(if (selectedTransferCode == code) PrimaryBlue.copy(alpha = 0.1f) else BgColor, RoundedCornerShape(12.dp)).clickable { selectedTransferCode = code }.padding(12.dp),
