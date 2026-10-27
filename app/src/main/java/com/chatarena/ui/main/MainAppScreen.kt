@@ -46,11 +46,11 @@ fun MainAppScreen() {
     var showSettingsModal by remember { mutableStateOf(false) }
     var showCreateGroup by remember { mutableStateOf(false) }
 
-    // Dummy Data for Chat List (Baad me API se aayega)
+    // यहाँ एरर था जिसे ठीक कर दिया गया है (सबको 5 पैरामीटर और String ("") बना दिया है)
     val mockChatList = listOf(
-        ChatItem("group", "g1", "Developers", "5 members"),
-        ChatItem("user", "u1", "John Doe", "john_123", 2),
-        ChatItem("user", "u2", "Jane Smith", "jane_456", 0)
+        ChatItem("group", "g1", "Developers", "5 members", "0"),
+        ChatItem("user", "u1", "John Doe", "john_123", "2"),
+        ChatItem("user", "u2", "Jane Smith", "jane_456", "0")
     )
 
     Box(modifier = Modifier.fillMaxSize().background(BgColor).systemBarsPadding()) {
@@ -269,33 +269,4 @@ fun SettingsModal(email: String, onClose: () -> Unit, onLogout: () -> Unit) {
     AlertDialog(
         onDismissRequest = onClose,
         containerColor = CardColor,
-        title = { Text("Settings", color = TextColor) },
-        text = {
-            Column {
-                Text("Logged in as:\n$email", color = SubTextColor, fontSize = 14.sp)
-                Spacer(modifier = Modifier.height(16.dp))
-                Button(
-                    onClick = onLogout,
-                    colors = ButtonDefaults.buttonColors(containerColor = DangerRed),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("🚪 Log Out", color = Color.White)
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onClose) { Text("Close", color = PrimaryBlue) }
-        }
-    )
-}
-
-@Composable
-fun PlaceholderModal(title: String, onClose: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onClose,
-        containerColor = CardColor,
-        title = { Text(title, color = TextColor) },
-        text = { Text("This feature is under construction.", color = SubTextColor) },
-        confirmButton = { TextButton(onClick = onClose) { Text("OK", color = PrimaryBlue) } }
-    )
-}
+        
