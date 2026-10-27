@@ -52,21 +52,24 @@ fun GroupInfoScreen(
     var showTransferModal by remember { mutableStateOf(false) }
     var selectedTransferCode by remember { mutableStateOf<String?>(null) }
 
-    // सबसे ऊपर ही सारे डेटा को पक्के String Format में बदल दिया, ताकि मशीन आगे कन्फ्यूज़ न हो
+    // साफ़-साफ़ नाम दिया गया है (adminItem और memberItem) ताकि 'it' वाला एरर न आए
     val adminsList: List<String> = remember(currentGroup) {
-        if (currentGroup.admins.isNotEmpty()) currentGroup.admins.map { it.toString() } 
-        else if (currentGroup.adminCode != null) listOf(currentGroup.adminCode.toString()) 
-        else emptyList()
+        if (currentGroup.admins.isNotEmpty()) {
+            currentGroup.admins.map { adminItem -> adminItem.toString() }
+        } else if (currentGroup.adminCode != null) {
+            listOf(currentGroup.adminCode.toString())
+        } else {
+            emptyList()
+        }
     }
     
     val memberStrings: List<String> = remember(currentGroup) {
-        currentGroup.members.map { it.toString() }
+        currentGroup.members.map { memberItem -> memberItem.toString() }
     }
 
     val isAdmin = adminsList.contains(currentUserCode)
     val isLastAdmin = isAdmin && adminsList.size == 1
 
-    // साफ़ तौर पर List<Contact> बताया है
     val availableContacts: List<Contact> = remember(searchQuery, contactsList, memberStrings) {
         contactsList.filter { contact ->
             contact.userCode != currentUserCode &&
@@ -77,7 +80,7 @@ fun GroupInfoScreen(
 
     fun getMemberInfo(code: String): Contact {
         if (code == currentUserCode) return Contact(code, "You", null, "Online")
-        return contactsList.find { it.userCode == code } ?: Contact(code, code, null, "Hey there!")
+        return contactsList.find { c -> c.userCode == code } ?: Contact(code, code, null, "Hey there!")
     }
 
     fun formatDate(ts: Long): String {
@@ -206,8 +209,8 @@ fun GroupInfoScreen(
                                 Text("No match found.", color = SubTextColor, fontSize = 12.sp, modifier = Modifier.padding(10.dp))
                             } else {
                                 LazyColumn {
-                                    // यहाँ साफ़-साफ़ Type 'Contact' बता दिया
-                                    items(availableContacts) { contact: Contact ->
+                                    // Compose को कन्फ्यूजन से बचाने के लिए 'items =' का इस्तेमाल
+                                    items(items = availableContacts) { contact ->
                                         Row(
                                             modifier = Modifier.fillMaxWidth().clickable {
                                                 val updatedMembers = currentGroup.members + contact.userCode
@@ -233,8 +236,8 @@ fun GroupInfoScreen(
             }
 
             // Members List
-            // यहाँ साफ़-साफ़ Type 'String' बता दिया
-            items(memberStrings) { memberCode: String ->
+            // यहाँ भी 'items =' का इस्तेमाल
+            items(items = memberStrings) { memberCode ->
                 val info = getMemberInfo(memberCode)
                 val isMemberAdmin = adminsList.contains(memberCode)
                 
@@ -269,8 +272,8 @@ fun GroupInfoScreen(
                             Icon(
                                 Icons.Default.Close, contentDescription = "Remove", tint = DangerRed, 
                                 modifier = Modifier.size(22.dp).clickable { 
-                                    // Safe removal using strict string checking
-                                    val updatedMembers = currentGroup.members.filter { it.toString() != memberCode }
+                                    // 'it' को हटाकर mItem साफ़-साफ़ लिखा है
+                                    val updatedMembers = currentGroup.members.filter { mItem -> mItem.toString() != memberCode }
                                     currentGroup = currentGroup.copy(members = updatedMembers)
                                     onGroupUpdated(currentGroup)
                                 }.padding(2.dp)
@@ -339,11 +342,11 @@ fun GroupInfoScreen(
                     Text("Transfer Admin & Leave", color = PrimaryBlue, fontSize = 17.sp, fontWeight = FontWeight.Bold)
                     Text("You are the last admin. Please choose the next admin before leaving.", color = SubTextColor, fontSize = 12.sp, modifier = Modifier.padding(vertical = 8.dp))
                     
-                    val transferableMembers: List<String> = memberStrings.filter { it != currentUserCode }
+                    val transferableMembers: List<String> = memberStrings.filter { codeItem -> codeItem != currentUserCode }
                     
                     LazyColumn(modifier = Modifier.weight(1f, fill = false).heightIn(max = 250.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        // यहाँ साफ़-साफ़ Type 'String' बता दिया
-                        items(transferableMembers) { code: String ->
+                        // यहाँ भी 'items =' का इस्तेमाल
+                        items(items = transferableMembers) { code ->
                             val info = getMemberInfo(code)
                             Row(
                                 modifier = Modifier.fillMaxWidth().background(if (selectedTransferCode == code) PrimaryBlue.copy(alpha = 0.1f) else BgColor, RoundedCornerShape(12.dp)).clickable { selectedTransferCode = code }.padding(12.dp),
