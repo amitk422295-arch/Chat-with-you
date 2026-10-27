@@ -12,13 +12,14 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.chatarena.ChatItem // Imported from Models.kt
+import com.chatarena.ChatItem
 import com.chatarena.ui.auth.BgColor
 import com.chatarena.ui.auth.CardColor
 import com.chatarena.ui.auth.DangerRed
@@ -41,7 +42,7 @@ fun ChatListScreen(
         chatList.filter { it.name.contains(searchQuery, ignoreCase = true) || it.subtitle.contains(searchQuery) }
     } else chatList
 
-    Column(modifier = Modifier.fillMaxSize()) {
+    Column(modifier = Modifier.fillMaxSize().imePadding()) { // imePadding se keyboard screen ko cover nahi karega
         // SEARCH BAR HEADER
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -78,33 +79,6 @@ fun ChatListScreen(
                     }
                 }
             }
-
-            if (isSearching) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().background(CardColor, RoundedCornerShape(16.dp)).padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    CircularProgressIndicator(color = PrimaryBlue, modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
-                    Spacer(modifier = Modifier.width(16.dp))
-                    Column {
-                        Text("Searching on ChatArena...", color = TextColor, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                        Text("Looking up $searchQuery", color = SubTextColor, fontSize = 12.sp)
-                    }
-                }
-            }
-
-            if (userNotFound && !isSearching) {
-                Column(
-                    modifier = Modifier.fillMaxWidth().background(CardColor, RoundedCornerShape(16.dp)).padding(12.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Text("No user found with \"$searchQuery\".", color = SubTextColor, fontSize = 13.sp)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Button(onClick = {}, colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue), shape = RoundedCornerShape(12.dp)) {
-                        Text("Invite via Link ↗", color = Color.White, fontSize = 12.sp)
-                    }
-                }
-            }
         }
 
         // LIST AREA
@@ -122,7 +96,24 @@ fun ChatListScreen(
                 }
             } else {
                 if (chatList.isEmpty()) {
-                    item { Text("No chats yet.", color = SubTextColor, modifier = Modifier.padding(20.dp).fillMaxWidth(), textAlign = TextAlign.Center) }
+                    // NATIVE EMPTY STATE (Jab koi chat na ho)
+                    item {
+                        Column(
+                            modifier = Modifier.fillMaxWidth().padding(top = 100.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Box(
+                                modifier = Modifier.size(80.dp).background(CardColor, CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("💬", fontSize = 36.sp)
+                            }
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Text("No chats yet", color = TextColor, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text("Start a new conversation to see it here.", color = SubTextColor, fontSize = 14.sp)
+                        }
+                    }
                 } else {
                     items(chatList) { item -> ChatListItemRow(item, onItemClick) }
                 }
@@ -134,10 +125,14 @@ fun ChatListScreen(
 @Composable
 fun ChatListItemRow(item: ChatItem, onClick: (ChatItem) -> Unit) {
     Row(
-        modifier = Modifier.fillMaxWidth().clickable { onClick(item) }.padding(horizontal = 16.dp, vertical = 12.dp),
+        // Native ripple effect ke liye clip(RoundedCornerShape) add kiya gaya hai
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp)) 
+            .clickable { onClick(item) }
+            .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Avatar (Text placeholder for now)
         Box(
             modifier = Modifier.size(50.dp).background(BgColor, CircleShape),
             contentAlignment = Alignment.Center
