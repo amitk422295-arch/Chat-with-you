@@ -31,7 +31,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import com.chatarena.ChatItem // Imported from Models.kt
+import com.chatarena.ChatItem
 import com.chatarena.ui.auth.*
 import kotlinx.coroutines.launch
 import kotlin.random.Random
@@ -88,14 +88,14 @@ fun MainAppScreen() {
                 }
             }
 
-            // Panes Content
+            // Panes Content (yahan beyondBoundsPageCount fix kiya gaya hai)
             HorizontalPager(
                 state = pagerState, 
                 modifier = Modifier.weight(1f),
-                beyondViewportPageCount = 1 // Reels ko background me load rakhega taaki lag na ho
+                beyondBoundsPageCount = 1 
             ) { page ->
                 when (page) {
-                    0 -> ChatListScreen(chatList = emptyList()) // Dummy data removed
+                    0 -> ChatListScreen(chatList = emptyList())
                     1 -> ReelsWebView(url = "https://reel-center-2.onrender.com")
                     2 -> CallsPlaceholder()
                 }
@@ -156,8 +156,8 @@ fun ReelsWebView(url: String) {
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = true
                 settings.loadsImagesAutomatically = true
-                settings.mediaPlaybackRequiresUserGesture = false // Media smooth chalne ke liye
-                setLayerType(WebView.LAYER_TYPE_HARDWARE, null) // Hardware acceleration for Reels
+                settings.mediaPlaybackRequiresUserGesture = false
+                setLayerType(WebView.LAYER_TYPE_HARDWARE, null) 
                 loadUrl(url)
             }
         },
