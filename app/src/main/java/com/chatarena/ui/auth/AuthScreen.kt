@@ -5,9 +5,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -88,32 +90,43 @@ fun AuthScreen(onLoginSuccess: () -> Unit = {}) {
         modifier = Modifier
             .fillMaxSize()
             .background(BgColor)
+            // यहाँ मेन फिक्स है: कीबोर्ड और स्टेटस बार को सही से एडजस्ट करने के लिए
+            .windowInsetsPadding(WindowInsets.safeDrawing)
             .pointerInput(Unit) {
                 // Bahar click karne par keyboard band karne ka logic
                 detectTapGestures(onTap = {
                     focusManager.clearFocus()
                 })
-            }
-            .padding(24.dp),
+            },
         contentAlignment = Alignment.Center
     ) {
-        if (!isProfileSetup) {
-            LoginCard(
-                email = email, onEmailChange = { email = it },
-                otp = otp, onOtpChange = { otp = it },
-                showOtpBox = showOtpBox, isLoading = isLoading, buttonText = buttonText,
-                onSendOTP = { sendAuthOTP() },
-                onValidateOTP = { validateAuthOTP() },
-                onChangeEmail = { otp = ""; showOtpBox = false; buttonText = "Send OTP" }
-            )
-        } else {
-            ProfileSetupModal(
-                setupName = setupName, onNameChange = { setupName = it },
-                setupMobile = setupMobile,
-                onMobileChange = { input -> if (input.length <= 10) setupMobile = input.filter { it.isDigit() } },
-                isLoading = isLoading,
-                onSave = { submitProfileSetup() }
-            )
+        // अगर स्क्रीन छोटी है या कीबोर्ड बहुत ऊपर आता है, तो स्क्रॉल हो सके इसलिए Column में डाला
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            if (!isProfileSetup) {
+                LoginCard(
+                    email = email, onEmailChange = { email = it },
+                    otp = otp, onOtpChange = { otp = it },
+                    showOtpBox = showOtpBox, isLoading = isLoading, buttonText = buttonText,
+                    onSendOTP = { sendAuthOTP() },
+                    onValidateOTP = { validateAuthOTP() },
+                    onChangeEmail = { otp = ""; showOtpBox = false; buttonText = "Send OTP" }
+                )
+            } else {
+                ProfileSetupModal(
+                    setupName = setupName, onNameChange = { setupName = it },
+                    setupMobile = setupMobile,
+                    onMobileChange = { input -> if (input.length <= 10) setupMobile = input.filter { it.isDigit() } },
+                    isLoading = isLoading,
+                    onSave = { submitProfileSetup() }
+                )
+            }
         }
     }
 }
