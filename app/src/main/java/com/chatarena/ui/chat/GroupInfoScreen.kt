@@ -22,10 +22,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import com.chatarena.Contact
+import com.chatarena.GroupData
 import com.chatarena.ui.auth.*
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -52,35 +53,28 @@ fun GroupInfoScreen(
     var showTransferModal by remember { mutableStateOf(false) }
     var selectedTransferCode by remember { mutableStateOf<String?>(null) }
 
-    // साफ़-साफ़ नाम दिया गया है (adminItem और memberItem) ताकि 'it' वाला एरर न आए
-    val adminsList: List<String> = remember(currentGroup) {
-        if (currentGroup.admins.isNotEmpty()) {
-            currentGroup.admins.map { adminItem -> adminItem.toString() }
-        } else if (currentGroup.adminCode != null) {
-            listOf(currentGroup.adminCode.toString())
-        } else {
-            emptyList()
-        }
+    // Derived state
+    val adminsList = remember(currentGroup) {
+        if (currentGroup.admins.isNotEmpty()) currentGroup.admins 
+        else if (currentGroup.adminCode != null) listOf(currentGroup.adminCode) 
+        else emptyList()
     }
-    
-    val memberStrings: List<String> = remember(currentGroup) {
-        currentGroup.members.map { memberItem -> memberItem.toString() }
-    }
-
     val isAdmin = adminsList.contains(currentUserCode)
     val isLastAdmin = isAdmin && adminsList.size == 1
+    val members = currentGroup.members
 
-    val availableContacts: List<Contact> = remember(searchQuery, contactsList, memberStrings) {
-        contactsList.filter { contact ->
-            contact.userCode != currentUserCode &&
-            !memberStrings.contains(contact.userCode) &&
-            (searchQuery.isBlank() || contact.name.contains(searchQuery, true) || contact.userCode.contains(searchQuery, true))
+    // Filter contacts
+    val availableContacts = remember(searchQuery, contactsList, members) {
+        contactsList.filter {
+            it.userCode != currentUserCode &&
+            !members.contains(it.userCode) &&
+            (searchQuery.isBlank() || it.name.contains(searchQuery, true) || it.userCode.contains(searchQuery, true))
         }
     }
 
     fun getMemberInfo(code: String): Contact {
         if (code == currentUserCode) return Contact(code, "You", null, "Online")
-        return contactsList.find { c -> c.userCode == code } ?: Contact(code, code, null, "Hey there!")
+        return contactsList.find { it.userCode == code } ?: Contact(code, code, null, "Hey there!")
     }
 
     fun formatDate(ts: Long): String {
@@ -123,7 +117,7 @@ fun GroupInfoScreen(
                         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
                             BasicTextField(
                                 value = editedName,
-                                onValueChange = { newName -> if (newName.length <= 50) editedName = newName },
+                                onValueChange = { if (it.length <= 50) editedName = it },
                                 textStyle = TextStyle(fontSize = 18.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, color = TextColor),
                                 modifier = Modifier.weight(1f, fill = false).padding(bottom = 4.dp)
                             )
@@ -153,11 +147,11 @@ fun GroupInfoScreen(
 
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        "${memberStrings.size} members • ${adminsList.size} admins • Created ${formatDate(currentGroup.createdAt)}",
+                        "${members.size} members • ${adminsList.size} admins • Created ${formatDate(currentGroup.createdAt)}",
                         color = SubTextColor, fontSize = 12.sp
                     )
                 }
-                Divider(color = CardColor, thickness = 1.dp)
+                HorizontalDivider(color = CardColor, thickness = 1.dp)
             }
 
             // Members Section Header
@@ -167,7 +161,7 @@ fun GroupInfoScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("MEMBERS (${memberStrings.size})", color = SubTextColor, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text("MEMBERS (${members.size})", color = SubTextColor, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     if (isAdmin) {
                         Button(
                             onClick = { showAddMember = !showAddMember },
@@ -194,7 +188,7 @@ fun GroupInfoScreen(
                                 Spacer(modifier = Modifier.width(8.dp))
                                 BasicTextField(
                                     value = searchQuery,
-                                    onValueChange = { q -> searchQuery = q },
+                                    onValueChange = { searchQuery = it },
                                     modifier = Modifier.padding(vertical = 12.dp).weight(1f),
                                     decorationBox = { inner ->
                                         if (searchQuery.isEmpty()) Text("Search contacts...", color = SubTextColor, fontSize = 13.sp)
@@ -209,12 +203,10 @@ fun GroupInfoScreen(
                                 Text("No match found.", color = SubTextColor, fontSize = 12.sp, modifier = Modifier.padding(10.dp))
                             } else {
                                 LazyColumn {
-                                    // Compose को कन्फ्यूजन से बचाने के लिए 'items =' का इस्तेमाल
-                                    items(items = availableContacts) { contact ->
+                                    items(availableContacts) { contact ->
                                         Row(
                                             modifier = Modifier.fillMaxWidth().clickable {
-                                                val updatedMembers = currentGroup.members + contact.userCode
-                                                currentGroup = currentGroup.copy(members = updatedMembers)
+                                                currentGroup = currentGroup.copy(members = members + contact.userCode)
                                                 onGroupUpdated(currentGroup)
                                                 showAddMember = false
                                             }.padding(8.dp),
@@ -236,8 +228,7 @@ fun GroupInfoScreen(
             }
 
             // Members List
-            // यहाँ भी 'items =' का इस्तेमाल
-            items(items = memberStrings) { memberCode ->
+            items(members) { memberCode ->
                 val info = getMemberInfo(memberCode)
                 val isMemberAdmin = adminsList.contains(memberCode)
                 
@@ -261,7 +252,6 @@ fun GroupInfoScreen(
                         Spacer(modifier = Modifier.width(8.dp))
                     }
 
-                    // Action Buttons
                     if (isAdmin && memberCode != currentUserCode) {
                         if (!isMemberAdmin) {
                             Icon(
@@ -272,9 +262,7 @@ fun GroupInfoScreen(
                             Icon(
                                 Icons.Default.Close, contentDescription = "Remove", tint = DangerRed, 
                                 modifier = Modifier.size(22.dp).clickable { 
-                                    // 'it' को हटाकर mItem साफ़-साफ़ लिखा है
-                                    val updatedMembers = currentGroup.members.filter { mItem -> mItem.toString() != memberCode }
-                                    currentGroup = currentGroup.copy(members = updatedMembers)
+                                    currentGroup = currentGroup.copy(members = members - memberCode)
                                     onGroupUpdated(currentGroup)
                                 }.padding(2.dp)
                             )
@@ -291,7 +279,7 @@ fun GroupInfoScreen(
             // Leave Group Button
             item {
                 Column(modifier = Modifier.padding(18.dp)) {
-                    Divider(color = CardColor, thickness = 1.dp)
+                    HorizontalDivider(color = CardColor, thickness = 1.dp)
                     Spacer(modifier = Modifier.height(18.dp))
                     Button(
                         onClick = { 
@@ -313,25 +301,15 @@ fun GroupInfoScreen(
 
     // Leave Dialog
     if (showLeaveDialog) {
-        Dialog(onDismissRequest = { showLeaveDialog = false }) {
-            Surface(
-                shape = RoundedCornerShape(16.dp),
-                color = CardColor,
-                shadowElevation = 8.dp
-            ) {
-                Column(modifier = Modifier.padding(24.dp)) {
-                    Text("Leave Group?", color = TextColor, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text("Are you sure you want to leave this group? You will not be able to read new messages.", color = SubTextColor, fontSize = 14.sp)
-                    Spacer(modifier = Modifier.height(24.dp))
-                    Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
-                        TextButton(onClick = { showLeaveDialog = false }) { Text("Cancel", color = PrimaryBlue) }
-                        Spacer(modifier = Modifier.width(8.dp))
-                        TextButton(onClick = { showLeaveDialog = false; onClose() }) { Text("Leave", color = DangerRed) }
-                    }
-                }
-            }
-        }
+        AlertDialog(
+            onDismissRequest = { showLeaveDialog = false },
+            title = { Text("Leave Group?") },
+            text = { Text("Are you sure you want to leave this group? You will not be able to read new messages.") },
+            confirmButton = {
+                TextButton(onClick = { showLeaveDialog = false; onClose() }) { Text("Leave", color = DangerRed) }
+            },
+            dismissButton = { TextButton(onClick = { showLeaveDialog = false }) { Text("Cancel", color = PrimaryBlue) } }
+        )
     }
 
     // Transfer Admin Dialog
@@ -342,11 +320,8 @@ fun GroupInfoScreen(
                     Text("Transfer Admin & Leave", color = PrimaryBlue, fontSize = 17.sp, fontWeight = FontWeight.Bold)
                     Text("You are the last admin. Please choose the next admin before leaving.", color = SubTextColor, fontSize = 12.sp, modifier = Modifier.padding(vertical = 8.dp))
                     
-                    val transferableMembers: List<String> = memberStrings.filter { codeItem -> codeItem != currentUserCode }
-                    
                     LazyColumn(modifier = Modifier.weight(1f, fill = false).heightIn(max = 250.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        // यहाँ भी 'items =' का इस्तेमाल
-                        items(items = transferableMembers) { code ->
+                        items(members.filter { it != currentUserCode }) { code ->
                             val info = getMemberInfo(code)
                             Row(
                                 modifier = Modifier.fillMaxWidth().background(if (selectedTransferCode == code) PrimaryBlue.copy(alpha = 0.1f) else BgColor, RoundedCornerShape(12.dp)).clickable { selectedTransferCode = code }.padding(12.dp),
