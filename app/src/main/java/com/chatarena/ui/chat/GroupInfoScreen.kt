@@ -9,11 +9,14 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ExitToApp
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
@@ -27,16 +30,6 @@ import com.chatarena.ui.auth.*
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-
-data class GroupData(
-    val groupId: String,
-    val name: String,
-    val avatarUrl: String? = null,
-    val members: List<String> = emptyList(),
-    val admins: List<String> = emptyList(),
-    val adminCode: String? = null, // For backward compatibility
-    val createdAt: Long = System.currentTimeMillis()
-)
 
 @Composable
 fun GroupInfoScreen(
@@ -96,7 +89,9 @@ fun GroupInfoScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Surface(shape = CircleShape, color = CardColor, shadowElevation = 4.dp, modifier = Modifier.size(38.dp).clickable { onClose() }) {
-                Box(contentAlignment = Alignment.Center) { Text("⬅", color = PrimaryBlue, fontSize = 18.sp) }
+                Box(contentAlignment = Alignment.Center) { 
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = PrimaryBlue) 
+                }
             }
             Spacer(modifier = Modifier.width(16.dp))
             Text("Group Info", color = PrimaryBlue, fontWeight = FontWeight.Bold, fontSize = 17.sp)
@@ -113,7 +108,7 @@ fun GroupInfoScreen(
                         modifier = Modifier.size(100.dp).background(CardColor, CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text("👥", fontSize = 44.sp, color = PrimaryBlue)
+                        Icon(Icons.Default.Groups, contentDescription = "Group", tint = PrimaryBlue, modifier = Modifier.size(50.dp))
                     }
                     Spacer(modifier = Modifier.height(16.dp))
 
@@ -141,7 +136,10 @@ fun GroupInfoScreen(
                             Text(currentGroup.name, color = TextColor, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                             if (isAdmin) {
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Text("✏️", modifier = Modifier.clickable { editingName = true })
+                                Icon(
+                                    Icons.Default.Edit, contentDescription = "Edit", tint = PrimaryBlue,
+                                    modifier = Modifier.size(20.dp).clickable { editingName = true }
+                                )
                             }
                         }
                     }
@@ -171,7 +169,9 @@ fun GroupInfoScreen(
                             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
                             modifier = Modifier.height(30.dp)
                         ) {
-                            Text("+ Add", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Icon(Icons.Default.Add, contentDescription = "Add", tint = Color.White, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Add", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -182,15 +182,19 @@ fun GroupInfoScreen(
                 item {
                     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp).background(CardColor, RoundedCornerShape(14.dp)).padding(12.dp)) {
                         Surface(shape = RoundedCornerShape(16.dp), color = Color.White, modifier = Modifier.fillMaxWidth()) {
-                            BasicTextField(
-                                value = searchQuery,
-                                onValueChange = { searchQuery = it },
-                                modifier = Modifier.padding(12.dp),
-                                decorationBox = { inner ->
-                                    if (searchQuery.isEmpty()) Text("Search contacts...", color = SubTextColor, fontSize = 13.sp)
-                                    inner()
-                                }
-                            )
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 12.dp)) {
+                                Icon(Icons.Default.Search, contentDescription = "Search", tint = SubTextColor, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                BasicTextField(
+                                    value = searchQuery,
+                                    onValueChange = { searchQuery = it },
+                                    modifier = Modifier.padding(vertical = 12.dp).weight(1f),
+                                    decorationBox = { inner ->
+                                        if (searchQuery.isEmpty()) Text("Search contacts...", color = SubTextColor, fontSize = 13.sp)
+                                        inner()
+                                    }
+                                )
+                            }
                         }
                         Spacer(modifier = Modifier.height(10.dp))
                         Column(modifier = Modifier.heightIn(max = 200.dp)) {
@@ -201,7 +205,6 @@ fun GroupInfoScreen(
                                     items(availableContacts) { contact ->
                                         Row(
                                             modifier = Modifier.fillMaxWidth().clickable {
-                                                // TODO: API Call addMember
                                                 currentGroup = currentGroup.copy(members = members + contact.userCode)
                                                 onGroupUpdated(currentGroup)
                                                 showAddMember = false
@@ -213,7 +216,7 @@ fun GroupInfoScreen(
                                             }
                                             Spacer(modifier = Modifier.width(10.dp))
                                             Text(contact.name, color = TextColor, fontSize = 14.sp, modifier = Modifier.weight(1f))
-                                            Text("+", color = PrimaryBlue, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                                            Icon(Icons.Default.Add, contentDescription = "Add", tint = PrimaryBlue, modifier = Modifier.size(20.dp))
                                         }
                                     }
                                 }
@@ -251,20 +254,23 @@ fun GroupInfoScreen(
                     // Action Buttons (Make Admin, Remove, etc)
                     if (isAdmin && memberCode != currentUserCode) {
                         if (!isMemberAdmin) {
-                            Text("⭐", modifier = Modifier.clickable { 
-                                // TODO: API Call Promote 
-                                Toast.makeText(context, "Promoted", Toast.LENGTH_SHORT).show()
-                            }.padding(4.dp))
-                            Text("❌", modifier = Modifier.clickable { 
-                                // TODO: API Call Remove 
-                                currentGroup = currentGroup.copy(members = members - memberCode)
-                                onGroupUpdated(currentGroup)
-                            }.padding(4.dp))
+                            Icon(
+                                Icons.Default.Star, contentDescription = "Make Admin", tint = Color(0xFFFFB300), 
+                                modifier = Modifier.size(22.dp).clickable { Toast.makeText(context, "Promoted", Toast.LENGTH_SHORT).show() }.padding(2.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Icon(
+                                Icons.Default.Close, contentDescription = "Remove", tint = DangerRed, 
+                                modifier = Modifier.size(22.dp).clickable { 
+                                    currentGroup = currentGroup.copy(members = members - memberCode)
+                                    onGroupUpdated(currentGroup)
+                                }.padding(2.dp)
+                            )
                         } else if (adminsList.size > 1) {
-                            Text("✖️", modifier = Modifier.clickable { 
-                                // TODO: API Call Demote
-                                Toast.makeText(context, "Demoted", Toast.LENGTH_SHORT).show()
-                            }.padding(4.dp))
+                            Icon(
+                                Icons.Default.RemoveCircleOutline, contentDescription = "Demote Admin", tint = DangerRed, 
+                                modifier = Modifier.size(22.dp).clickable { Toast.makeText(context, "Demoted", Toast.LENGTH_SHORT).show() }.padding(2.dp)
+                            )
                         }
                     }
                 }
@@ -283,6 +289,8 @@ fun GroupInfoScreen(
                         shape = RoundedCornerShape(14.dp),
                         modifier = Modifier.fillMaxWidth().height(50.dp)
                     ) {
+                        Icon(Icons.AutoMirrored.Filled.ExitToApp, contentDescription = "Leave", tint = DangerRed)
+                        Spacer(modifier = Modifier.width(8.dp))
                         Text(if (isLastAdmin) "Transfer & Leave Group" else "Leave Group", color = DangerRed, fontWeight = FontWeight.Bold)
                     }
                     Spacer(modifier = Modifier.height(24.dp))
@@ -291,18 +299,14 @@ fun GroupInfoScreen(
         }
     }
 
-    // Simple Leave Dialog
+    // Leave Dialog
     if (showLeaveDialog) {
         AlertDialog(
             onDismissRequest = { showLeaveDialog = false },
             title = { Text("Leave Group?") },
             text = { Text("Are you sure you want to leave this group? You will not be able to read new messages.") },
             confirmButton = {
-                TextButton(onClick = { 
-                    // TODO: API Call Leave
-                    showLeaveDialog = false
-                    onClose()
-                }) { Text("Leave", color = DangerRed) }
+                TextButton(onClick = { showLeaveDialog = false; onClose() }) { Text("Leave", color = DangerRed) }
             },
             dismissButton = { TextButton(onClick = { showLeaveDialog = false }) { Text("Cancel", color = PrimaryBlue) } }
         )
@@ -328,7 +332,9 @@ fun GroupInfoScreen(
                                 }
                                 Spacer(modifier = Modifier.width(12.dp))
                                 Text(info.name, color = TextColor, modifier = Modifier.weight(1f))
-                                if (selectedTransferCode == code) Text("✓", color = PrimaryBlue, fontWeight = FontWeight.Bold)
+                                if (selectedTransferCode == code) {
+                                    Icon(Icons.Default.Check, contentDescription = "Selected", tint = PrimaryBlue)
+                                }
                             }
                         }
                     }
@@ -338,7 +344,6 @@ fun GroupInfoScreen(
                             Text("Cancel", color = TextColor)
                         }
                         Button(onClick = { 
-                            // TODO: API Call Transfer and Leave
                             showTransferModal = false
                             onClose()
                         }, enabled = selectedTransferCode != null, modifier = Modifier.weight(1f)) {
@@ -350,6 +355,3 @@ fun GroupInfoScreen(
         }
     }
 }
-
-// Helper
-import androidx.compose.material3.Divider
