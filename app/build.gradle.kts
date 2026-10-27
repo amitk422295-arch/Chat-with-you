@@ -27,6 +27,8 @@ android {
     }
     kotlinOptions {
         jvmTarget = "1.8"
+        // नीचे दी गई यह लाइन एरर को ठीक करेगी
+        freeCompilerArgs += listOf("-opt-in=androidx.compose.foundation.ExperimentalFoundationApi")
     }
 }
 
