@@ -33,7 +33,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import com.chatarena.ChatItem
 import com.chatarena.ui.auth.*
 import kotlinx.coroutines.launch
@@ -50,82 +49,87 @@ fun MainAppScreen() {
     var showCreateGroup by remember { mutableStateOf(false) }
 
     Box(modifier = Modifier.fillMaxSize().background(BgColor).systemBarsPadding()) {
-        Column(modifier = Modifier.fillMaxSize()) {
-            // Top Navbar
-            Column(modifier = Modifier.background(CardColor)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("ChatArena", fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, color = PrimaryBlue)
-                    Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                        if (pagerState.currentPage == 0) {
-                            Icon(Icons.Default.Groups, contentDescription = "New Group", tint = PrimaryBlue, 
-                                modifier = Modifier.size(24.dp).clickable { showCreateGroup = true })
+        
+        // Asli App UI (Agar AI open nahi hai tabhi ye dikhega)
+        if (!showAIModal) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                // Top Navbar
+                Column(modifier = Modifier.background(CardColor)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("ChatArena", fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, color = PrimaryBlue)
+                        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                            if (pagerState.currentPage == 0) {
+                                Icon(Icons.Default.Groups, contentDescription = "New Group", tint = PrimaryBlue, 
+                                    modifier = Modifier.size(24.dp).clickable { showCreateGroup = true })
+                            }
+                            Icon(Icons.Default.Settings, contentDescription = "Settings", tint = SubTextColor, 
+                                modifier = Modifier.size(24.dp).clickable { showSettingsModal = true })
                         }
-                        Icon(Icons.Default.Settings, contentDescription = "Settings", tint = SubTextColor, 
-                            modifier = Modifier.size(24.dp).clickable { showSettingsModal = true })
+                    }
+                    
+                    // Tabs
+                    TabRow(
+                        selectedTabIndex = pagerState.currentPage,
+                        containerColor = CardColor,
+                        contentColor = PrimaryBlue,
+                        indicator = { tabPositions ->
+                            TabRowDefaults.SecondaryIndicator(
+                                modifier = Modifier.tabIndicatorOffset(tabPositions[pagerState.currentPage]),
+                                color = PrimaryBlue
+                            )
+                        }
+                    ) {
+                        listOf("CHATS", "REELS", "CALLS").forEachIndexed { index, title ->
+                            Tab(
+                                selected = pagerState.currentPage == index,
+                                onClick = { scope.launch { pagerState.animateScrollToPage(index) } },
+                                text = { Text(title, fontWeight = FontWeight.Bold, fontSize = 13.sp) }
+                            )
+                        }
                     }
                 }
-                
-                // Tabs
-                TabRow(
-                    selectedTabIndex = pagerState.currentPage,
-                    containerColor = CardColor,
-                    contentColor = PrimaryBlue,
-                    indicator = { tabPositions ->
-                        TabRowDefaults.SecondaryIndicator(
-                            modifier = Modifier.tabIndicatorOffset(tabPositions[pagerState.currentPage]),
-                            color = PrimaryBlue
-                        )
-                    }
-                ) {
-                    listOf("CHATS", "REELS", "CALLS").forEachIndexed { index, title ->
-                        Tab(
-                            selected = pagerState.currentPage == index,
-                            onClick = { scope.launch { pagerState.animateScrollToPage(index) } },
-                            text = { Text(title, fontWeight = FontWeight.Bold, fontSize = 13.sp) }
-                        )
+
+                // Panes Content
+                HorizontalPager(
+                    state = pagerState, 
+                    modifier = Modifier.weight(1f),
+                    beyondBoundsPageCount = 1 
+                ) { page ->
+                    when (page) {
+                        0 -> ChatListScreen(chatList = emptyList())
+                        1 -> ReelsWebView(url = "https://reel-center-2.onrender.com")
+                        2 -> CallsPlaceholder()
                     }
                 }
             }
 
-            // Panes Content
-            HorizontalPager(
-                state = pagerState, 
-                modifier = Modifier.weight(1f),
-                beyondBoundsPageCount = 1 
-            ) { page ->
-                when (page) {
-                    0 -> ChatListScreen(chatList = emptyList())
-                    1 -> ReelsWebView(url = "https://reel-center-2.onrender.com")
-                    2 -> CallsPlaceholder()
-                }
-            }
-        }
-
-        // AI FAB
-        if (pagerState.currentPage != 1) {
-            Box(modifier = Modifier.align(Alignment.BottomEnd).padding(24.dp)) {
-                Surface(
-                    shape = CircleShape,
-                    color = PrimaryBlue,
-                    shadowElevation = 8.dp,
-                    modifier = Modifier.size(60.dp).clickable { showAIModal = true }
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Text("✨", fontSize = 24.sp)
+            // AI FAB
+            if (pagerState.currentPage != 1) {
+                Box(modifier = Modifier.align(Alignment.BottomEnd).padding(24.dp)) {
+                    Surface(
+                        shape = CircleShape,
+                        color = PrimaryBlue,
+                        shadowElevation = 8.dp,
+                        modifier = Modifier.size(60.dp).clickable { showAIModal = true }
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text("✨", fontSize = 24.sp)
+                        }
                     }
                 }
             }
         }
 
-        // Modals
+        // AI Chat Screen (Direct overlay, no dialog)
         if (showAIModal) {
             AIModalScreen(onClose = { showAIModal = false })
         }
 
+        // Settings Modal
         if (showSettingsModal) {
             SettingsModal(
                 email = "user@example.com",
@@ -137,6 +141,7 @@ fun MainAppScreen() {
             )
         }
 
+        // Create Group Modal
         if (showCreateGroup) {
             PlaceholderModal(title = "Create Group", onClose = { showCreateGroup = false })
         }
@@ -174,108 +179,103 @@ data class AIMessage(val id: String, val text: String, val isUser: Boolean)
 fun AIModalScreen(onClose: () -> Unit) {
     var promptText by remember { mutableStateOf("") }
     val messages = remember { mutableStateListOf(AIMessage("0", "Hi there! I am ChatArena AI. How can I help you today?", false)) }
-    
-    // Keyboard fix ke liye FocusManager
     val focusManager = LocalFocusManager.current
 
-    Dialog(
-        onDismissRequest = onClose,
-        // decorFitsSystemWindows = false lagaya hai taaki keyboard layout ko theek se adjust kare
-        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
+    // Yahan Dialog hata kar direct Surface use kiya hai taaki WhatsApp jaisa full screen lage
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = BgColor
     ) {
-        Surface(modifier = Modifier.fillMaxSize(), color = BgColor) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .systemBarsPadding()
-                    .imePadding() // Ye line input box ko keyboard ke upar push karegi
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .systemBarsPadding()
+                .imePadding() // Keyboard aane par input box upar aayega
+        ) {
+            // AI Top Bar (Header)
+            Row(
+                modifier = Modifier.fillMaxWidth().background(CardColor).padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                // AI Top Bar
-                Row(
-                    modifier = Modifier.fillMaxWidth().background(CardColor).padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("⬅", fontSize = 24.sp, color = PrimaryBlue, modifier = Modifier.clickable { onClose() })
-                    Spacer(modifier = Modifier.width(16.dp))
-                    Box(
-                        modifier = Modifier.size(40.dp).background(
-                            Brush.linearGradient(listOf(PrimaryBlue, Color(0xFF00C6FF))),
-                            CircleShape
-                        ),
-                        contentAlignment = Alignment.Center
-                    ) { Text("✨", fontSize = 20.sp) }
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Column {
-                        Text("ChatArena AI", color = PrimaryBlue, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                        Text("Smart Assistant", color = SubTextColor, fontSize = 12.sp)
-                    }
+                Text("⬅", fontSize = 24.sp, color = PrimaryBlue, modifier = Modifier.clickable { onClose() })
+                Spacer(modifier = Modifier.width(16.dp))
+                Box(
+                    modifier = Modifier.size(40.dp).background(
+                        Brush.linearGradient(listOf(PrimaryBlue, Color(0xFF00C6FF))),
+                        CircleShape
+                    ),
+                    contentAlignment = Alignment.Center
+                ) { Text("✨", fontSize = 20.sp) }
+                Spacer(modifier = Modifier.width(12.dp))
+                Column {
+                    Text("ChatArena AI", color = PrimaryBlue, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Text("Smart Assistant", color = SubTextColor, fontSize = 12.sp)
                 }
+            }
 
-                // Chat Area (Yahan click karne se keyboard band hoga)
-                LazyColumn(
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(16.dp)
-                        .pointerInput(Unit) {
-                            detectTapGestures(onTap = {
-                                focusManager.clearFocus()
-                            })
-                        },
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(messages) { msg ->
-                        Box(modifier = Modifier.fillMaxWidth(), contentAlignment = if (msg.isUser) Alignment.CenterEnd else Alignment.CenterStart) {
-                            Surface(
-                                color = if (msg.isUser) PrimaryBlue else CardColor,
-                                shape = RoundedCornerShape(12.dp),
-                                shadowElevation = 2.dp,
-                                modifier = Modifier.widthIn(max = 280.dp)
-                            ) {
-                                Text(
-                                    text = msg.text,
-                                    color = if (msg.isUser) Color.White else TextColor,
-                                    modifier = Modifier.padding(12.dp)
-                                )
-                            }
+            // Chat Area
+            LazyColumn(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(16.dp)
+                    .pointerInput(Unit) {
+                        detectTapGestures(onTap = {
+                            focusManager.clearFocus() // Bahar click karne par keyboard band
+                        })
+                    },
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(messages) { msg ->
+                    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = if (msg.isUser) Alignment.CenterEnd else Alignment.CenterStart) {
+                        Surface(
+                            color = if (msg.isUser) PrimaryBlue else CardColor,
+                            shape = RoundedCornerShape(12.dp),
+                            shadowElevation = 2.dp,
+                            modifier = Modifier.widthIn(max = 280.dp)
+                        ) {
+                            Text(
+                                text = msg.text,
+                                color = if (msg.isUser) Color.White else TextColor,
+                                modifier = Modifier.padding(12.dp)
+                            )
                         }
                     }
                 }
+            }
 
-                // Input Area
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
+            // Input Area
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Surface(
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(24.dp),
+                    color = CardColor,
+                    shadowElevation = 4.dp
                 ) {
-                    Surface(
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(24.dp),
-                        color = CardColor,
-                        shadowElevation = 4.dp
-                    ) {
-                        BasicTextField(
-                            value = promptText,
-                            onValueChange = { promptText = it },
-                            modifier = Modifier.padding(16.dp),
-                            decorationBox = { inner -> 
-                                if (promptText.isEmpty()) Text("Ask ChatArena AI...", color = SubTextColor)
-                                inner()
-                            }
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Surface(
-                        shape = CircleShape,
-                        color = PrimaryBlue,
-                        modifier = Modifier.size(48.dp).clickable {
-                            if (promptText.isNotBlank()) {
-                                messages.add(AIMessage(Random.nextInt().toString(), promptText, true))
-                                promptText = ""
-                                // Send button dabane par keyboard khula rahega (focus clear nahi kar rahe)
-                            }
+                    BasicTextField(
+                        value = promptText,
+                        onValueChange = { promptText = it },
+                        modifier = Modifier.padding(16.dp),
+                        decorationBox = { inner -> 
+                            if (promptText.isEmpty()) Text("Ask ChatArena AI...", color = SubTextColor)
+                            inner()
                         }
-                    ) {
-                        Box(contentAlignment = Alignment.Center) { Text("➤", color = Color.White) }
+                    )
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+                Surface(
+                    shape = CircleShape,
+                    color = PrimaryBlue,
+                    modifier = Modifier.size(48.dp).clickable {
+                        if (promptText.isNotBlank()) {
+                            messages.add(AIMessage(Random.nextInt().toString(), promptText, true))
+                            promptText = ""
+                        }
                     }
+                ) {
+                    Box(contentAlignment = Alignment.Center) { Text("➤", color = Color.White) }
                 }
             }
         }
