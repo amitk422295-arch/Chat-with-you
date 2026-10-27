@@ -5,6 +5,7 @@ import android.webkit.WebViewClient
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -23,7 +24,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -88,7 +91,7 @@ fun MainAppScreen() {
                 }
             }
 
-            // Panes Content (yahan beyondBoundsPageCount fix kiya gaya hai)
+            // Panes Content
             HorizontalPager(
                 state = pagerState, 
                 modifier = Modifier.weight(1f),
@@ -171,13 +174,22 @@ data class AIMessage(val id: String, val text: String, val isUser: Boolean)
 fun AIModalScreen(onClose: () -> Unit) {
     var promptText by remember { mutableStateOf("") }
     val messages = remember { mutableStateListOf(AIMessage("0", "Hi there! I am ChatArena AI. How can I help you today?", false)) }
+    
+    // Keyboard fix ke liye FocusManager
+    val focusManager = LocalFocusManager.current
 
     Dialog(
         onDismissRequest = onClose,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
+        // decorFitsSystemWindows = false lagaya hai taaki keyboard layout ko theek se adjust kare
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
     ) {
         Surface(modifier = Modifier.fillMaxSize(), color = BgColor) {
-            Column(modifier = Modifier.fillMaxSize().systemBarsPadding()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .systemBarsPadding()
+                    .imePadding() // Ye line input box ko keyboard ke upar push karegi
+            ) {
                 // AI Top Bar
                 Row(
                     modifier = Modifier.fillMaxWidth().background(CardColor).padding(16.dp),
@@ -199,9 +211,16 @@ fun AIModalScreen(onClose: () -> Unit) {
                     }
                 }
 
-                // Chat Area
+                // Chat Area (Yahan click karne se keyboard band hoga)
                 LazyColumn(
-                    modifier = Modifier.weight(1f).padding(16.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(16.dp)
+                        .pointerInput(Unit) {
+                            detectTapGestures(onTap = {
+                                focusManager.clearFocus()
+                            })
+                        },
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     items(messages) { msg ->
@@ -251,6 +270,7 @@ fun AIModalScreen(onClose: () -> Unit) {
                             if (promptText.isNotBlank()) {
                                 messages.add(AIMessage(Random.nextInt().toString(), promptText, true))
                                 promptText = ""
+                                // Send button dabane par keyboard khula rahega (focus clear nahi kar rahe)
                             }
                         }
                     ) {
