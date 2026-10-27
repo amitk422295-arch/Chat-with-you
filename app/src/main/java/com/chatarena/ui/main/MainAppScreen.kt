@@ -48,11 +48,12 @@ fun MainAppScreen() {
     var showSettingsModal by remember { mutableStateOf(false) }
     var showCreateGroup by remember { mutableStateOf(false) }
 
-    Box(modifier = Modifier.fillMaxSize().background(BgColor).systemBarsPadding()) {
+    // यहाँ से systemBarsPadding() हटा दिया गया है ताकि अंदर कीबोर्ड पैडिंग ठीक से काम करे
+    Box(modifier = Modifier.fillMaxSize().background(BgColor)) {
         
         // Asli App UI (Agar AI open nahi hai tabhi ye dikhega)
         if (!showAIModal) {
-            Column(modifier = Modifier.fillMaxSize()) {
+            Column(modifier = Modifier.fillMaxSize().systemBarsPadding()) { // पैडिंग अब सिर्फ मेन UI पर है
                 // Top Navbar
                 Column(modifier = Modifier.background(CardColor)) {
                     Row(
@@ -109,7 +110,7 @@ fun MainAppScreen() {
 
             // AI FAB
             if (pagerState.currentPage != 1) {
-                Box(modifier = Modifier.align(Alignment.BottomEnd).padding(24.dp)) {
+                Box(modifier = Modifier.align(Alignment.BottomEnd).padding(24.dp).navigationBarsPadding()) {
                     Surface(
                         shape = CircleShape,
                         color = PrimaryBlue,
@@ -124,7 +125,7 @@ fun MainAppScreen() {
             }
         }
 
-        // AI Chat Screen (Direct overlay, no dialog)
+        // AI Chat Screen
         if (showAIModal) {
             AIModalScreen(onClose = { showAIModal = false })
         }
@@ -181,7 +182,6 @@ fun AIModalScreen(onClose: () -> Unit) {
     val messages = remember { mutableStateListOf(AIMessage("0", "Hi there! I am ChatArena AI. How can I help you today?", false)) }
     val focusManager = LocalFocusManager.current
 
-    // Yahan Dialog hata kar direct Surface use kiya hai taaki WhatsApp jaisa full screen lage
     Surface(
         modifier = Modifier.fillMaxSize(),
         color = BgColor
@@ -189,8 +189,8 @@ fun AIModalScreen(onClose: () -> Unit) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .systemBarsPadding()
-                .imePadding() // Keyboard aane par input box upar aayega
+                // safeDrawingInsets कीबोर्ड (ime) और स्टेटस बार दोनों को एकदम सही से हैंडल करता है
+                .windowInsetsPadding(WindowInsets.safeDrawing) 
         ) {
             // AI Top Bar (Header)
             Row(
@@ -217,13 +217,14 @@ fun AIModalScreen(onClose: () -> Unit) {
             LazyColumn(
                 modifier = Modifier
                     .weight(1f)
-                    .padding(16.dp)
+                    .padding(horizontal = 16.dp)
                     .pointerInput(Unit) {
                         detectTapGestures(onTap = {
                             focusManager.clearFocus() // Bahar click karne par keyboard band
                         })
                     },
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(vertical = 16.dp)
             ) {
                 items(messages) { msg ->
                     Box(modifier = Modifier.fillMaxWidth(), contentAlignment = if (msg.isUser) Alignment.CenterEnd else Alignment.CenterStart) {
@@ -245,7 +246,10 @@ fun AIModalScreen(onClose: () -> Unit) {
 
             // Input Area
             Row(
-                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(BgColor)
+                    .padding(16.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Surface(
@@ -285,6 +289,7 @@ fun AIModalScreen(onClose: () -> Unit) {
 @Composable
 fun SettingsModal(email: String, onClose: () -> Unit, onLogout: () -> Unit) {
     Dialog(onDismissRequest = onClose) {
+        // (बाकी का SettingsModal और PlaceholderModal का कोड वैसा ही है)
         Surface(
             shape = RoundedCornerShape(16.dp),
             color = CardColor,
