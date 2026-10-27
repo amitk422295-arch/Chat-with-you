@@ -9,6 +9,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState // यह नया इम्पोर्ट जोड़ा है
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
@@ -48,12 +49,11 @@ fun MainAppScreen() {
     var showSettingsModal by remember { mutableStateOf(false) }
     var showCreateGroup by remember { mutableStateOf(false) }
 
-    // यहाँ से systemBarsPadding() हटा दिया गया है ताकि अंदर कीबोर्ड पैडिंग ठीक से काम करे
     Box(modifier = Modifier.fillMaxSize().background(BgColor)) {
         
         // Asli App UI (Agar AI open nahi hai tabhi ye dikhega)
         if (!showAIModal) {
-            Column(modifier = Modifier.fillMaxSize().systemBarsPadding()) { // पैडिंग अब सिर्फ मेन UI पर है
+            Column(modifier = Modifier.fillMaxSize().systemBarsPadding()) { 
                 // Top Navbar
                 Column(modifier = Modifier.background(CardColor)) {
                     Row(
@@ -181,6 +181,16 @@ fun AIModalScreen(onClose: () -> Unit) {
     var promptText by remember { mutableStateOf("") }
     val messages = remember { mutableStateListOf(AIMessage("0", "Hi there! I am ChatArena AI. How can I help you today?", false)) }
     val focusManager = LocalFocusManager.current
+    
+    // --- ऑटो-स्क्रॉल के लिए जोड़ा गया कोड शुरू ---
+    val listState = rememberLazyListState()
+
+    LaunchedEffect(messages.size) {
+        if (messages.isNotEmpty()) {
+            listState.animateScrollToItem(messages.size - 1)
+        }
+    }
+    // --- ऑटो-स्क्रॉल के लिए जोड़ा गया कोड खत्म ---
 
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -189,7 +199,6 @@ fun AIModalScreen(onClose: () -> Unit) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                // safeDrawingInsets कीबोर्ड (ime) और स्टेटस बार दोनों को एकदम सही से हैंडल करता है
                 .windowInsetsPadding(WindowInsets.safeDrawing) 
         ) {
             // AI Top Bar (Header)
@@ -215,6 +224,7 @@ fun AIModalScreen(onClose: () -> Unit) {
 
             // Chat Area
             LazyColumn(
+                state = listState, // यहाँ लिस्ट का स्टेट पास किया है
                 modifier = Modifier
                     .weight(1f)
                     .padding(horizontal = 16.dp)
@@ -289,7 +299,6 @@ fun AIModalScreen(onClose: () -> Unit) {
 @Composable
 fun SettingsModal(email: String, onClose: () -> Unit, onLogout: () -> Unit) {
     Dialog(onDismissRequest = onClose) {
-        // (बाकी का SettingsModal और PlaceholderModal का कोड वैसा ही है)
         Surface(
             shape = RoundedCornerShape(16.dp),
             color = CardColor,
