@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.chatarena.ChatItem // Imported from Models.kt
 import com.chatarena.ui.auth.*
 import kotlinx.coroutines.launch
 import kotlin.random.Random
@@ -44,13 +45,6 @@ fun MainAppScreen() {
     var showAIModal by remember { mutableStateOf(false) }
     var showSettingsModal by remember { mutableStateOf(false) }
     var showCreateGroup by remember { mutableStateOf(false) }
-
-    // यहाँ एरर था जिसे ठीक कर दिया गया है (सबको String ("") बना दिया है)
-    val mockChatList = listOf(
-        ChatItem("group", "g1", "Developers", "5 members", "0"),
-        ChatItem("user", "u1", "John Doe", "john_123", "2"),
-        ChatItem("user", "u2", "Jane Smith", "jane_456", "0")
-    )
 
     Box(modifier = Modifier.fillMaxSize().background(BgColor).systemBarsPadding()) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -95,9 +89,13 @@ fun MainAppScreen() {
             }
 
             // Panes Content
-            HorizontalPager(state = pagerState, modifier = Modifier.weight(1f)) { page ->
+            HorizontalPager(
+                state = pagerState, 
+                modifier = Modifier.weight(1f),
+                beyondViewportPageCount = 1 // Reels ko background me load rakhega taaki lag na ho
+            ) { page ->
                 when (page) {
-                    0 -> ChatListScreen(chatList = mockChatList)
+                    0 -> ChatListScreen(chatList = emptyList()) // Dummy data removed
                     1 -> ReelsWebView(url = "https://reel-center-2.onrender.com")
                     2 -> CallsPlaceholder()
                 }
@@ -157,6 +155,9 @@ fun ReelsWebView(url: String) {
                 webViewClient = WebViewClient()
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = true
+                settings.loadsImagesAutomatically = true
+                settings.mediaPlaybackRequiresUserGesture = false // Media smooth chalne ke liye
+                setLayerType(WebView.LAYER_TYPE_HARDWARE, null) // Hardware acceleration for Reels
                 loadUrl(url)
             }
         },
@@ -261,7 +262,6 @@ fun AIModalScreen(onClose: () -> Unit) {
     }
 }
 
-// AlertDialog को सुरक्षित Dialog से रिप्लेस कर दिया है
 @Composable
 fun SettingsModal(email: String, onClose: () -> Unit, onLogout: () -> Unit) {
     Dialog(onDismissRequest = onClose) {
@@ -294,7 +294,6 @@ fun SettingsModal(email: String, onClose: () -> Unit, onLogout: () -> Unit) {
     }
 }
 
-// यहाँ भी सुरक्षित Dialog लगा दिया है
 @Composable
 fun PlaceholderModal(title: String, onClose: () -> Unit) {
     Dialog(onDismissRequest = onClose) {
