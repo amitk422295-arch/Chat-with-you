@@ -18,20 +18,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.chatarena.Contact // <--- Yahan import add kiya hai
 import com.chatarena.ui.auth.*
-
-data class Contact(
-    val userCode: String,
-    val name: String,
-    val avatarUrl: String? = null,
-    val status: String = ""
-)
 
 @Composable
 fun CreateGroupScreen(
@@ -241,7 +235,7 @@ fun CreateGroupScreen(
             // Contacts List
             if (filteredContacts.isEmpty()) {
                 item {
-                    Text("No contacts match your search.", color = SubTextColor, modifier = Modifier.fillMaxWidth().padding(40.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                    Text("No contacts match your search.", color = SubTextColor, modifier = Modifier.fillMaxWidth().padding(40.dp), textAlign = TextAlign.Center)
                 }
             } else {
                 items(filteredContacts, key = { it.userCode }) { contact ->
