@@ -1,5 +1,7 @@
 package com.chatarena.ui.main
 
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -11,11 +13,13 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Groups
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -23,10 +27,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import com.chatarena.ui.auth.* // Colors aur Neumorphic designs import kiye
+import com.chatarena.ui.auth.*
 import kotlinx.coroutines.launch
+import kotlin.random.Random
 
 @Composable
 fun MainAppScreen() {
@@ -38,91 +44,86 @@ fun MainAppScreen() {
     var showSettingsModal by remember { mutableStateOf(false) }
     var showCreateGroup by remember { mutableStateOf(false) }
 
-    // Placeholder for activeChatTarget
-    val activeChatTarget = null
+    // Dummy Data for Chat List (Baad me API se aayega)
+    val mockChatList = listOf(
+        ChatItem("group", "g1", "Developers", "5 members"),
+        ChatItem("user", "u1", "John Doe", "john_123", 2),
+        ChatItem("user", "u2", "Jane Smith", "jane_456", 0)
+    )
 
-    Box(modifier = Modifier.fillMaxSize().background(BgColor)) {
-        if (activeChatTarget == null) {
-            Column(modifier = Modifier.fillMaxSize()) {
-                // Top Navbar
-                Column(modifier = Modifier.background(CardColor).padding(top = 16.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("ChatArena", fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, color = PrimaryBlue)
-                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            if (pagerState.currentPage == 0) {
-                                Text("👥", fontSize = 20.sp, modifier = Modifier.clickable { showCreateGroup = true })
-                            }
-                            Text("⚙️", fontSize = 20.sp, modifier = Modifier.clickable { showSettingsModal = true })
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(16.dp))
-                    
-                    // Tabs
-                    TabRow(
-                        selectedTabIndex = pagerState.currentPage,
-                        containerColor = CardColor,
-                        contentColor = PrimaryBlue,
-                        indicator = { tabPositions ->
-                            TabRowDefaults.SecondaryIndicator(
-                                modifier = Modifier.tabIndicatorOffset(tabPositions[pagerState.currentPage]),
-                                color = PrimaryBlue
-                            )
-                        }
-                    ) {
-                        listOf("CHATS", "REELS", "CALLS").forEachIndexed { index, title ->
-                            Tab(
-                                selected = pagerState.currentPage == index,
-                                onClick = { scope.launch { pagerState.animateScrollToPage(index) } },
-                                text = { Text(title, fontWeight = FontWeight.Bold, fontSize = 13.sp) }
-                            )
-                        }
-                    }
-                }
-
-                // Panes Content
-                HorizontalPager(state = pagerState, modifier = Modifier.weight(1f)) { page ->
-                    when (page) {
-                        0 -> ChatListPlaceholder()
-                        1 -> ReelsPlaceholder()
-                        2 -> CallsPlaceholder()
-                    }
-                }
-            }
-
-            // AI FAB
-            if (pagerState.currentPage != 1) {
-                Box(
-                    modifier = Modifier.align(Alignment.BottomEnd).padding(24.dp)
+    Box(modifier = Modifier.fillMaxSize().background(BgColor).systemBarsPadding()) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            // Top Navbar
+            Column(modifier = Modifier.background(CardColor)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Surface(
-                        shape = CircleShape,
-                        color = PrimaryBlue,
-                        shadowElevation = 8.dp,
-                        modifier = Modifier.size(60.dp).clickable { showAIModal = true }
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Text("✨", fontSize = 24.sp)
+                    Text("ChatArena", fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, color = PrimaryBlue)
+                    Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        if (pagerState.currentPage == 0) {
+                            Icon(Icons.Default.Groups, contentDescription = "New Group", tint = PrimaryBlue, 
+                                modifier = Modifier.size(24.dp).clickable { showCreateGroup = true })
                         }
+                        Icon(Icons.Default.Settings, contentDescription = "Settings", tint = SubTextColor, 
+                            modifier = Modifier.size(24.dp).clickable { showSettingsModal = true })
+                    }
+                }
+                
+                // Tabs
+                TabRow(
+                    selectedTabIndex = pagerState.currentPage,
+                    containerColor = CardColor,
+                    contentColor = PrimaryBlue,
+                    indicator = { tabPositions ->
+                        TabRowDefaults.SecondaryIndicator(
+                            modifier = Modifier.tabIndicatorOffset(tabPositions[pagerState.currentPage]),
+                            color = PrimaryBlue
+                        )
+                    }
+                ) {
+                    listOf("CHATS", "REELS", "CALLS").forEachIndexed { index, title ->
+                        Tab(
+                            selected = pagerState.currentPage == index,
+                            onClick = { scope.launch { pagerState.animateScrollToPage(index) } },
+                            text = { Text(title, fontWeight = FontWeight.Bold, fontSize = 13.sp) }
+                        )
                     }
                 }
             }
-        } else {
-            // Active Chat Target View
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("Chat Room Open (Placeholder)", color = TextColor)
+
+            // Panes Content
+            HorizontalPager(state = pagerState, modifier = Modifier.weight(1f)) { page ->
+                when (page) {
+                    0 -> ChatListScreen(chatList = mockChatList)
+                    1 -> ReelsWebView(url = "https://reel-center-2.onrender.com")
+                    2 -> CallsPlaceholder()
+                }
             }
         }
 
-        // AI Modal
+        // AI FAB
+        if (pagerState.currentPage != 1) {
+            Box(modifier = Modifier.align(Alignment.BottomEnd).padding(24.dp)) {
+                Surface(
+                    shape = CircleShape,
+                    color = PrimaryBlue,
+                    shadowElevation = 8.dp,
+                    modifier = Modifier.size(60.dp).clickable { showAIModal = true }
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text("✨", fontSize = 24.sp)
+                    }
+                }
+            }
+        }
+
+        // Modals
         if (showAIModal) {
             AIModalScreen(onClose = { showAIModal = false })
         }
 
-        // Settings Modal
         if (showSettingsModal) {
             SettingsModal(
                 email = "user@example.com",
@@ -134,24 +135,10 @@ fun MainAppScreen() {
             )
         }
 
-        // Create Group Placeholder
         if (showCreateGroup) {
+            // Yahan CreateGroupScreen aayega, abhi ke liye placeholder
             PlaceholderModal(title = "Create Group", onClose = { showCreateGroup = false })
         }
-    }
-}
-
-@Composable
-fun ChatListPlaceholder() {
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text("Chat List Here", color = SubTextColor)
-    }
-}
-
-@Composable
-fun ReelsPlaceholder() {
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text("Reels View (WebView required)", color = SubTextColor)
     }
 }
 
@@ -163,16 +150,33 @@ fun CallsPlaceholder() {
 }
 
 @Composable
+fun ReelsWebView(url: String) {
+    AndroidView(
+        factory = { context ->
+            WebView(context).apply {
+                webViewClient = WebViewClient()
+                settings.javaScriptEnabled = true
+                settings.domStorageEnabled = true
+                loadUrl(url)
+            }
+        },
+        modifier = Modifier.fillMaxSize()
+    )
+}
+
+data class AIMessage(val id: String, val text: String, val isUser: Boolean)
+
+@Composable
 fun AIModalScreen(onClose: () -> Unit) {
     var promptText by remember { mutableStateOf("") }
-    val messages = remember { mutableStateListOf("Hi there! I am ChatArena AI. How can I help you today?") }
+    val messages = remember { mutableStateListOf(AIMessage("0", "Hi there! I am ChatArena AI. How can I help you today?", false)) }
 
     Dialog(
         onDismissRequest = onClose,
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
         Surface(modifier = Modifier.fillMaxSize(), color = BgColor) {
-            Column(modifier = Modifier.fillMaxSize()) {
+            Column(modifier = Modifier.fillMaxSize().systemBarsPadding()) {
                 // AI Top Bar
                 Row(
                     modifier = Modifier.fillMaxWidth().background(CardColor).padding(16.dp),
@@ -200,16 +204,19 @@ fun AIModalScreen(onClose: () -> Unit) {
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     items(messages) { msg ->
-                        Surface(
-                            color = if (msg.startsWith("Hi")) CardColor else PrimaryBlue,
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.fillMaxWidth(0.8f)
-                        ) {
-                            Text(
-                                text = msg,
-                                color = if (msg.startsWith("Hi")) TextColor else Color.White,
-                                modifier = Modifier.padding(12.dp)
-                            )
+                        Box(modifier = Modifier.fillMaxWidth(), contentAlignment = if (msg.isUser) Alignment.CenterEnd else Alignment.CenterStart) {
+                            Surface(
+                                color = if (msg.isUser) PrimaryBlue else CardColor,
+                                shape = RoundedCornerShape(12.dp),
+                                shadowElevation = 2.dp,
+                                modifier = Modifier.widthIn(max = 280.dp)
+                            ) {
+                                Text(
+                                    text = msg.text,
+                                    color = if (msg.isUser) Color.White else TextColor,
+                                    modifier = Modifier.padding(12.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -241,8 +248,9 @@ fun AIModalScreen(onClose: () -> Unit) {
                         color = PrimaryBlue,
                         modifier = Modifier.size(48.dp).clickable {
                             if (promptText.isNotBlank()) {
-                                messages.add(promptText)
+                                messages.add(AIMessage(Random.nextInt().toString(), promptText, true))
                                 promptText = ""
+                                // TODO: API call to /api/ai/chat
                             }
                         }
                     ) {
