@@ -52,19 +52,20 @@ fun GroupInfoScreen(
     var showTransferModal by remember { mutableStateOf(false) }
     var selectedTransferCode by remember { mutableStateOf<String?>(null) }
 
-    // Derived state (Safe toString conversion)
-    val adminsList = remember(currentGroup) {
-        if (currentGroup.admins.isNotEmpty()) currentGroup.admins.map { it.toString() } 
+    // साफ़ तौर पर List<String> बता दिया गया है ताकि मशीन कन्फ्यूज़ न हो
+    val adminsList: List<String> = remember(currentGroup) {
+        if (currentGroup.admins.isNotEmpty()) currentGroup.admins.map { admin -> admin.toString() } 
         else if (currentGroup.adminCode != null) listOf(currentGroup.adminCode.toString()) 
         else emptyList()
     }
+    
     val isAdmin = adminsList.contains(currentUserCode)
     val isLastAdmin = isAdmin && adminsList.size == 1
     val members = currentGroup.members
 
-    // Filter contacts explicitly
-    val availableContacts = remember(searchQuery, contactsList, members) {
-        val memberStrList = members.map { it.toString() }
+    // यहाँ साफ़ तौर पर List<Contact> बताया गया है जिससे line 216 और 219 का name वाला एरर सॉल्व होगा
+    val availableContacts: List<Contact> = remember(searchQuery, contactsList, members) {
+        val memberStrList = members.map { m -> m.toString() }
         contactsList.filter { contact ->
             contact.userCode != currentUserCode &&
             !memberStrList.contains(contact.userCode) &&
@@ -74,7 +75,7 @@ fun GroupInfoScreen(
 
     fun getMemberInfo(code: String): Contact {
         if (code == currentUserCode) return Contact(code, "You", null, "Online")
-        return contactsList.find { it.userCode == code } ?: Contact(code, code, null, "Hey there!")
+        return contactsList.find { c -> c.userCode == code } ?: Contact(code, code, null, "Hey there!")
     }
 
     fun formatDate(ts: Long): String {
@@ -117,7 +118,7 @@ fun GroupInfoScreen(
                         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
                             BasicTextField(
                                 value = editedName,
-                                onValueChange = { if (it.length <= 50) editedName = it },
+                                onValueChange = { newName -> if (newName.length <= 50) editedName = newName },
                                 textStyle = TextStyle(fontSize = 18.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, color = TextColor),
                                 modifier = Modifier.weight(1f, fill = false).padding(bottom = 4.dp)
                             )
@@ -188,7 +189,7 @@ fun GroupInfoScreen(
                                 Spacer(modifier = Modifier.width(8.dp))
                                 BasicTextField(
                                     value = searchQuery,
-                                    onValueChange = { searchQuery = it },
+                                    onValueChange = { q -> searchQuery = q },
                                     modifier = Modifier.padding(vertical = 12.dp).weight(1f),
                                     decorationBox = { inner ->
                                         if (searchQuery.isEmpty()) Text("Search contacts...", color = SubTextColor, fontSize = 13.sp)
@@ -324,7 +325,7 @@ fun GroupInfoScreen(
         }
     }
 
-    // Transfer Admin Dialog (Bulletproof toString conversion)
+    // Transfer Admin Dialog (यहाँ it हटाकर m -> m.toString() कर दिया गया है)
     if (showTransferModal) {
         Dialog(onDismissRequest = { showTransferModal = false }) {
             Surface(shape = RoundedCornerShape(20.dp), color = CardColor) {
@@ -333,8 +334,8 @@ fun GroupInfoScreen(
                     Text("You are the last admin. Please choose the next admin before leaving.", color = SubTextColor, fontSize = 12.sp, modifier = Modifier.padding(vertical = 8.dp))
                     
                     LazyColumn(modifier = Modifier.weight(1f, fill = false).heightIn(max = 250.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(members.filter { it.toString() != currentUserCode }) { rawCode ->
-                            val code = rawCode.toString() // Force String conversion
+                        items(members.filter { m -> m.toString() != currentUserCode }) { rawCode ->
+                            val code = rawCode.toString() 
                             val info = getMemberInfo(code)
                             Row(
                                 modifier = Modifier.fillMaxWidth().background(if (selectedTransferCode == code) PrimaryBlue.copy(alpha = 0.1f) else BgColor, RoundedCornerShape(12.dp)).clickable { selectedTransferCode = code }.padding(12.dp),
