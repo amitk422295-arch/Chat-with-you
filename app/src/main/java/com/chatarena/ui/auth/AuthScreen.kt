@@ -41,7 +41,6 @@ val DangerRed = Color(0xFFFF3B5C)
 fun AuthScreen(onLoginSuccess: () -> Unit = {}) {
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
-    // API call ke liye Coroutine Scope
     val scope = rememberCoroutineScope()
 
     var email by remember { mutableStateOf("") }
@@ -49,6 +48,9 @@ fun AuthScreen(onLoginSuccess: () -> Unit = {}) {
     var showOtpBox by remember { mutableStateOf(false) }
     var isLoading by remember { mutableStateOf(false) }
     var buttonText by remember { mutableStateOf("Send OTP") }
+
+    // NAYA VARIABLE: Error dikhane ke liye
+    var errorMessage by remember { mutableStateOf("") }
 
     var isProfileSetup by remember { mutableStateOf(false) }
     var setupName by remember { mutableStateOf("") }
@@ -59,14 +61,13 @@ fun AuthScreen(onLoginSuccess: () -> Unit = {}) {
     fun sendAuthOTP() {
         val clean = email.trim().lowercase()
         if (clean.isEmpty() || !Regex("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$").matches(clean)) {
-            toast("Please enter a valid Email ID"); return
+            errorMessage = "Please enter a valid Email ID"; return
         }
         
-        isLoading = true; buttonText = "Sending... ⏳"
+        isLoading = true; buttonText = "Sending... ⏳"; errorMessage = ""
         
         scope.launch {
             try {
-                // REAL API CALL TO GO BACKEND
                 val response = RetrofitClient.apiService.sendOtp(OTPRequest(clean))
                 
                 if (response.isSuccessful && response.body()?.success == true) {
@@ -75,11 +76,13 @@ fun AuthScreen(onLoginSuccess: () -> Unit = {}) {
                     toast(response.body()?.message ?: "Access Code sent to your email!")
                 } else {
                     buttonText = "Send OTP"
-                    toast(response.body()?.error ?: "Failed to send OTP. Check Email.")
+                    // API Error Screen par dikhao
+                    errorMessage = response.body()?.error ?: "Failed. HTTP Code: ${response.code()}"
                 }
             } catch (e: Exception) {
                 buttonText = "Send OTP"
-                toast("Network Error: ${e.message}")
+                // Network Error Screen par dikhao
+                errorMessage = "Network Error: ${e.message}"
             } finally {
                 isLoading = false
             }
@@ -89,26 +92,24 @@ fun AuthScreen(onLoginSuccess: () -> Unit = {}) {
     fun validateAuthOTP() {
         val cleanOtp = otp.trim()
         if (cleanOtp.length != 6 || !Regex("^\\d{6}$").matches(cleanOtp)) {
-            toast("Please enter the 6-digit code"); return
+            errorMessage = "Please enter the 6-digit code"; return
         }
         
-        isLoading = true
+        isLoading = true; errorMessage = ""
         
         scope.launch {
             try {
-                // REAL API CALL TO GO BACKEND
                 val response = RetrofitClient.apiService.verifyOtp(
                     VerifyRequest(email = email.trim().lowercase(), code = cleanOtp)
                 )
                 
                 if (response.isSuccessful && response.body()?.success == true) {
                     isProfileSetup = true
-                    // Yahan tu chahe toh token save kar sakta hai: response.body()?.chatToken
                 } else {
-                    toast(response.body()?.error ?: "Incorrect OTP")
+                    errorMessage = response.body()?.error ?: "Incorrect OTP"
                 }
             } catch (e: Exception) {
-                toast("Network Error: ${e.message}")
+                errorMessage = "Network Error: ${e.message}"
             } finally {
                 isLoading = false
             }
@@ -118,13 +119,10 @@ fun AuthScreen(onLoginSuccess: () -> Unit = {}) {
     fun submitProfileSetup() {
         val cleanName = setupName.trim()
         val cleanDigits = setupMobile.replace(Regex("\\D"), "")
-        if (cleanName.isEmpty()) { toast("Please enter your Full Name"); return }
-        if (cleanDigits.length != 10) { toast("Please enter a valid 10-digit mobile number"); return }
+        if (cleanName.isEmpty()) { errorMessage = "Please enter your Full Name"; return }
+        if (cleanDigits.length != 10) { errorMessage = "Please enter a valid 10-digit mobile number"; return }
         
-        isLoading = true
-        
-        // Abhi ke liye Profile setup ko local hi rakha hai, 
-        // API (/api/auth/update-profile) agle step me lagayenge jab token save hoga.
+        isLoading = true; errorMessage = ""
         isLoading = false
         isProfileSetup = false
         toast("Profile saved! (Local only for now)")
@@ -151,6 +149,18 @@ fun AuthScreen(onLoginSuccess: () -> Unit = {}) {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
+            // NAYA UI: Agar error hai toh laal rang me screen par dikhao
+            if (errorMessage.isNotEmpty()) {
+                Text(
+                    text = errorMessage,
+                    color = DangerRed,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(bottom = 16.dp)
+                )
+            }
+
             if (!isProfileSetup) {
                 LoginCard(
                     email = email, onEmailChange = { email = it },
@@ -158,7 +168,7 @@ fun AuthScreen(onLoginSuccess: () -> Unit = {}) {
                     showOtpBox = showOtpBox, isLoading = isLoading, buttonText = buttonText,
                     onSendOTP = { sendAuthOTP() },
                     onValidateOTP = { validateAuthOTP() },
-                    onChangeEmail = { otp = ""; showOtpBox = false; buttonText = "Send OTP" }
+                    onChangeEmail = { otp = ""; showOtpBox = false; buttonText = "Send OTP"; errorMessage = "" }
                 )
             } else {
                 ProfileSetupModal(
