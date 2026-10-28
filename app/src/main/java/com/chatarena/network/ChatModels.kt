@@ -2,7 +2,7 @@ package com.chatarena.network
 
 import com.google.gson.annotations.SerializedName
 
-// 1. Message Status (String ki jagah Enum use kiya, jo 100% Native practice hai)
+// 1. Message Status
 enum class MessageStatus {
     @SerializedName("pending") PENDING,
     @SerializedName("failed") FAILED,
@@ -18,14 +18,14 @@ enum class MessageType {
     @SerializedName("video") VIDEO
 }
 
-// 3. Message Model (Database aur UI dono ke liye)
+// 3. Message Model
 data class Message(
     @SerializedName("messageId") val messageId: String? = null,
     @SerializedName("clientMessageId") val clientMessageId: String? = null,
     @SerializedName("text") val text: String = "",
     @SerializedName("messageType") val messageType: String = "text",
     @SerializedName("senderCode") val senderCode: String = "",
-    @SerializedName("receiverCode") val receiverCode: String? = null, // Ye line add kar di hai
+    @SerializedName("receiverCode") val receiverCode: String? = null,
     @SerializedName("senderName") val senderName: String? = null,
     @SerializedName("mine") val mine: Boolean = false,
     @SerializedName("createdAt") val createdAt: Long = System.currentTimeMillis(),
@@ -35,23 +35,26 @@ data class Message(
     @SerializedName("isDeleted") val isDeleted: Boolean = false
 )
 
-// 4. WebSocket Event Wrapper (Jo socket.js me tha)
+// 4. WebSocket Event Wrapper
 data class SocketEvent(
     @SerializedName("type") val type: String,
     @SerializedName("payload") val payload: Any? = null,
     @SerializedName("cbId") val cbId: Int? = null
 )
 
-// 5. Send Message Payload (Jab hum message bhejenge)
+// 5. Send Message Payload (targetCode add kiya, aur sender details bhi)
 data class SendMessagePayload(
-    @SerializedName("receiverCode") val receiverCode: String,
+    @SerializedName("targetCode") val targetCode: String, 
     @SerializedName("text") val text: String,
     @SerializedName("clientMessageId") val clientMessageId: String,
     @SerializedName("messageType") val messageType: String = "text",
-    @SerializedName("replyTo") val replyTo: String? = null
+    @SerializedName("replyTo") val replyTo: String? = null,
+    @SerializedName("senderName") val senderName: String? = null,
+    @SerializedName("senderAvatar") val senderAvatar: String? = null,
+    @SerializedName("senderMobile") val senderMobile: String? = null
 )
 
-// 6. WebSocket Response Wrapper (Jab server message bhejega)
+// 6. WebSocket Response Wrapper
 data class SocketResponse(
     @SerializedName("type") val type: String,
     @SerializedName("payload") val payload: SocketPayload? = null
