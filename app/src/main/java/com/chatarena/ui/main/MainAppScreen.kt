@@ -76,8 +76,7 @@ fun MainAppScreen(onLogout: () -> Unit) {
         val finalChatList = mutableListOf<ChatItem>()
         val dbChatIds = mutableSetOf<String>()
 
-        // Pehle Database se chats uthao (Sabse latest and reliable text yahan se aayega)
-        // FIX: Using standard 'for' loop to avoid compiler inference errors
+        // Pehle Database se chats uthao 
         for (entity in recentMessagesEntity) {
             dbChatIds.add(entity.chatId)
             val metadata = serverMetadata[entity.chatId]
@@ -89,7 +88,7 @@ fun MainAppScreen(onLogout: () -> Unit) {
                 ChatItem(
                     type = "user",
                     id = entity.chatId,
-                    name = metadata?.name ?: entity.chatId, // Naam server se nahi mila toh mobile/ID dikhayenge
+                    name = metadata?.name ?: entity.chatId,
                     avatarUrl = metadata?.avatarUrl,
                     subtitle = subtitle,
                     unreadCount = metadata?.unreadCount ?: 0
@@ -97,8 +96,7 @@ fun MainAppScreen(onLogout: () -> Unit) {
             )
         }
 
-        // Fir wo chats add karo jo abhi tak DB me save nahi hue hain (Naye phone me login karne par)
-        // FIX: Using standard 'for' loop
+        // Fir wo chats add karo jo abhi tak DB me save nahi hue hain
         for (metadata in serverMetadata.values) {
             if (!dbChatIds.contains(metadata.id)) {
                 var subtitle = metadata.subtitle
@@ -116,12 +114,12 @@ fun MainAppScreen(onLogout: () -> Unit) {
         // Socket Connect karo
         ChatWebSocketClient.connect(currentUserCode, token)
 
-        // App khulte hi Server se metadata (Names, Unread counts) fetch karo
-        ChatWebSocketClient.getRecentChats { response ->
+        // App khulte hi Server se metadata fetch karo
+        // FIX: Added Explicit Type 'com.google.gson.JsonObject?' to 'response'
+        ChatWebSocketClient.getRecentChats { response: com.google.gson.JsonObject? ->
             if (response != null && response.has("success") && response.get("success").asBoolean) {
                 val chatsArray = response.getAsJsonArray("chats")
                 
-                // FIX: Standard for-loop instead of .forEach to resolve Kotlin compilation error
                 if (chatsArray != null) {
                     for (i in 0 until chatsArray.size()) {
                         val element = chatsArray.get(i)
@@ -146,7 +144,8 @@ fun MainAppScreen(onLogout: () -> Unit) {
         }
 
         // Naye messages aane par observe karna
-        ChatWebSocketClient.socketEvents.collect { response ->
+        // FIX: Added Explicit Type 'com.chatarena.network.SocketResponse' to 'response'
+        ChatWebSocketClient.socketEvents.collect { response: com.chatarena.network.SocketResponse ->
             val msg = response.payload?.message
             if (msg != null) {
                 val isMine = msg.senderCode == currentUserCode || msg.mine
@@ -154,7 +153,6 @@ fun MainAppScreen(onLogout: () -> Unit) {
                 val otherUserName = if (isMine) "User" else (msg.senderName ?: otherUserCode)
                 
                 if (otherUserCode.isNotEmpty()) {
-                    // 1. Metadata me Unread Count update karo (Sirf unke bheje msgs par)
                     if (!isMine) {
                         val existing = serverMetadata[otherUserCode]
                         serverMetadata[otherUserCode] = ChatItem(
@@ -167,7 +165,6 @@ fun MainAppScreen(onLogout: () -> Unit) {
                         )
                     }
 
-                    // 2. Database me Message Save Karo! 
                     val senderPubKey = CryptoManager.getPublicKeyFromDisk(context, msg.senderCode ?: "")
                     var decryptedText = msg.text
                     
@@ -204,10 +201,8 @@ fun MainAppScreen(onLogout: () -> Unit) {
 
     Box(modifier = Modifier.fillMaxSize().background(BgColor)) {
         
-        // Main App UI
         if (!showAIModal) {
             Column(modifier = Modifier.fillMaxSize().systemBarsPadding()) { 
-                // Top Navbar
                 Column(modifier = Modifier.background(CardColor)) {
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
@@ -229,14 +224,16 @@ fun MainAppScreen(onLogout: () -> Unit) {
                         selectedTabIndex = pagerState.currentPage,
                         containerColor = CardColor,
                         contentColor = PrimaryBlue,
-                        indicator = { tabPositions ->
+                        // FIX: Added Explicit Type to 'tabPositions'
+                        indicator = { tabPositions: List<androidx.compose.material3.TabPosition> ->
                             TabRowDefaults.SecondaryIndicator(
                                 modifier = Modifier.tabIndicatorOffset(tabPositions[pagerState.currentPage]),
                                 color = PrimaryBlue
                             )
                         }
                     ) {
-                        listOf("CHATS", "REELS", "CALLS").forEachIndexed { index, title ->
+                        // FIX: Added Explicit Types to 'index' and 'title'
+                        listOf("CHATS", "REELS", "CALLS").forEachIndexed { index: Int, title: String ->
                             Tab(
                                 selected = pagerState.currentPage == index,
                                 onClick = { scope.launch { pagerState.animateScrollToPage(index) } },
@@ -246,15 +243,17 @@ fun MainAppScreen(onLogout: () -> Unit) {
                     }
                 }
 
+                // FIX: Added Explicit Type 'Int' to 'page'
                 HorizontalPager(
                     state = pagerState, 
                     modifier = Modifier.weight(1f),
                     beyondBoundsPageCount = 1 
-                ) { page ->
+                ) { page: Int ->
                     when (page) {
                         0 -> ChatListScreen(
                             chatList = chatList,
-                            onItemClick = { clickedChat -> activeChat = clickedChat }
+                            // FIX: Added Explicit Type 'ChatItem' to 'clickedChat'
+                            onItemClick = { clickedChat: ChatItem -> activeChat = clickedChat }
                         )
                         1 -> ReelsWebView(url = "https://reel-center-2.onrender.com")
                         2 -> CallsPlaceholder()
@@ -278,7 +277,6 @@ fun MainAppScreen(onLogout: () -> Unit) {
             }
         }
 
-        // Chat Room Screen
         if (activeChat != null) {
             ChatRoomScreen(
                 chatItem = activeChat!!,
@@ -432,11 +430,13 @@ fun AIModalScreen(onClose: () -> Unit) {
                 modifier = Modifier
                     .weight(1f)
                     .padding(horizontal = 16.dp)
-                    .pointerInput(Unit) { detectTapGestures(onTap = { focusManager.clearFocus() }) },
+                    // FIX: Explicitly handled 'offset' parameter type for safety
+                    .pointerInput(Unit) { detectTapGestures(onTap = { offset: androidx.compose.ui.geometry.Offset -> focusManager.clearFocus() }) },
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 contentPadding = PaddingValues(vertical = 16.dp)
             ) {
-                items(messages) { msg ->
+                // FIX: Added Explicit Type 'AIMessage' to 'msg'
+                items(messages) { msg: AIMessage ->
                     Box(modifier = Modifier.fillMaxWidth(), contentAlignment = if (msg.isUser) Alignment.CenterEnd else Alignment.CenterStart) {
                         Surface(
                             color = if (msg.isUser) PrimaryBlue else CardColor,
