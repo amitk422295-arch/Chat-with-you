@@ -25,6 +25,7 @@ data class Message(
     @SerializedName("text") val text: String = "",
     @SerializedName("messageType") val messageType: String = "text",
     @SerializedName("senderCode") val senderCode: String = "",
+    @SerializedName("receiverCode") val receiverCode: String? = null, // Ye line add kar di hai
     @SerializedName("senderName") val senderName: String? = null,
     @SerializedName("mine") val mine: Boolean = false,
     @SerializedName("createdAt") val createdAt: Long = System.currentTimeMillis(),
