@@ -160,6 +160,19 @@ object ChatWebSocketClient {
         webSocket?.send(gson.toJson(event))
     }
 
+    // ==========================================
+    // NAYA FUNCTION: Home screen (Inbox) par purani chats fetch karne ke liye
+    // Yahi function miss hone ki wajah se build fail ho raha tha
+    // ==========================================
+    fun getRecentChats(onResult: (JsonObject?) -> Unit) {
+        val cbId = cbIdCounter.getAndIncrement()
+        val payload = JsonObject()
+        val event = mapOf("type" to "get-recent-chats", "payload" to payload, "cbId" to cbId)
+
+        startCallbackTimeout(cbId, onResult)
+        webSocket?.send(gson.toJson(event))
+    }
+
     fun getPublicKey(targetCode: String, onResult: (String?) -> Unit) {
         val cbId = cbIdCounter.getAndIncrement()
         val payload = JsonObject().apply { addProperty("targetCode", targetCode) }
