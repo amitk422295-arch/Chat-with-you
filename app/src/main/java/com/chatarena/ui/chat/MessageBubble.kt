@@ -6,7 +6,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -21,8 +20,11 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.chatarena.network.Message // Naya Import
 import com.chatarena.ui.auth.*
-import kotlinx.coroutines.delay
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
@@ -41,7 +43,8 @@ fun MessageBubble(
     var swipeOffsetX by remember { mutableStateOf(0f) }
     var showReplyIcon by remember { mutableStateOf(false) }
 
-    val isDeleted = message.text == "This message was deleted"
+    // Model ke hisaab se isDeleted check fix kiya gaya hai
+    val isDeleted = message.isDeleted || message.text == "This message was deleted"
     val isTextUnavailable = message.text == "🔒 Message Unavailable" || message.text == "🔒 Message Error"
 
     // Swipe to reply logic
@@ -124,7 +127,7 @@ fun MessageBubble(
                 // Sender Name (For Group Chats)
                 if (showSender && !isMine && !isDeleted) {
                     Text(
-                        text = message.senderName,
+                        text = message.senderName ?: "Unknown", // Null safety fix
                         color = PrimaryBlue,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
@@ -132,8 +135,8 @@ fun MessageBubble(
                     )
                 }
 
-                // Reply Preview
-                if (message.replyToId != null && !isDeleted) {
+                // Reply Preview (Property name fix kiya hai: replyToId -> replyTo)
+                if (message.replyTo != null && !isDeleted) {
                     Surface(
                         color = Color.Black.copy(alpha = 0.1f),
                         shape = RoundedCornerShape(4.dp),
@@ -143,7 +146,6 @@ fun MessageBubble(
                             .clickable { onJumpToReply() }
                     ) {
                         Row {
-                            // Left Blue Border
                             Box(modifier = Modifier.width(3.dp).height(30.dp).background(PrimaryBlue))
                             Column(modifier = Modifier.padding(6.dp)) {
                                 Text("Replying...", color = PrimaryBlue, fontSize = 12.sp, fontWeight = FontWeight.Bold)
@@ -153,7 +155,7 @@ fun MessageBubble(
                     }
                 }
 
-                // Content
+                // Content (Property name fix kiya hai: type -> messageType)
                 if (isDeleted) {
                     Text(
                         text = "This message was deleted",
@@ -161,7 +163,7 @@ fun MessageBubble(
                         fontSize = 14.sp,
                         fontStyle = FontStyle.Italic
                     )
-                } else if (message.type == "image") {
+                } else if (message.messageType == "image") {
                     Box(
                         modifier = Modifier
                             .size(200.dp)
@@ -192,7 +194,7 @@ fun MessageBubble(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "12:30 PM", // Format message.createdAt here
+                        text = formatTime(message.createdAt), // Asli time format function
                         color = if (isMine) Color.White.copy(alpha = 0.7f) else SubTextColor,
                         fontSize = 10.sp
                     )
@@ -207,5 +209,15 @@ fun MessageBubble(
                 }
             }
         }
+    }
+}
+
+// Helper Function: Time ko 12:30 PM jaisa format karne ke liye
+private fun formatTime(timestamp: Long): String {
+    return try {
+        val sdf = SimpleDateFormat("hh:mm a", Locale.getDefault())
+        sdf.format(Date(timestamp))
+    } catch (e: Exception) {
+        "12:00 PM"
     }
 }
