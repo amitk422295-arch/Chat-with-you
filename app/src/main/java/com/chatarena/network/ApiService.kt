@@ -15,10 +15,17 @@ interface ApiService {
     @POST("api/auth/verify-otp")
     suspend fun verifyOtp(@Body request: VerifyRequest): Response<VerifyResponse>
 
-    // 3. Naya User Profile Update karne ke liye (Naya add kiya gaya hai)
+    // 3. Naya User Profile Update karne ke liye
     @POST("api/auth/update-profile")
     suspend fun updateProfile(
         @Header("Authorization") token: String,
         @Body request: UpdateProfileRequest
     ): Response<VerifyResponse>
+
+    // 4. AI Chat ke liye
+    @POST("api/ai/chat")
+    suspend fun aiChat(
+        @Header("Authorization") token: String,
+        @Body request: AIRequest
+    ): Response<AIResponse>
 }
