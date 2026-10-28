@@ -2,7 +2,6 @@ package com.chatarena.ui.main
 
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -181,13 +180,11 @@ fun AIModalScreen(onClose: () -> Unit) {
     val messages = remember { mutableStateListOf(AIMessage("0", "Hi there! I am ChatArena AI. How can I help you today?", false)) }
     val focusManager = LocalFocusManager.current
     
-    // AI ki states
     var isAiThinking by remember { mutableStateOf(false) }
     var isTyping by remember { mutableStateOf(false) }
 
     val listState = rememberLazyListState()
 
-    // Auto-scroll logic (Jab naya message aaye ya type ho)
     LaunchedEffect(messages.size, messages.lastOrNull()?.text?.length) {
         if (messages.isNotEmpty()) {
             listState.animateScrollToItem(messages.size - 1)
@@ -196,18 +193,16 @@ fun AIModalScreen(onClose: () -> Unit) {
 
     fun sendMessage() {
         val text = promptText.trim()
-        if (text.isEmpty() || isAiThinking || isTyping) return
+        if (text.isEmpty() || isAiThinking || isTyping) return // Prevent sending if AI is busy
 
-        // 1. User ka message add karo
         messages.add(AIMessage(Random.nextInt().toString(), text, true))
-        promptText = ""
+        promptText = "" // Text clear ho gaya, par keyboard khula rahega
         isAiThinking = true
 
         val token = TokenManager.getToken(context) ?: ""
 
         scope.launch {
             try {
-                // 2. API Call
                 val response = RetrofitClient.apiService.aiChat(
                     token = "Bearer $token",
                     request = AIRequest(message = text)
@@ -218,19 +213,17 @@ fun AIModalScreen(onClose: () -> Unit) {
                 if (response.isSuccessful && response.body()?.success == true) {
                     val reply = response.body()?.reply ?: "No response from AI."
                     
-                    // 3. AI ka khaali message add karo (Typewriter effect ke liye)
                     val newMsgId = Random.nextInt().toString()
                     messages.add(AIMessage(newMsgId, "", false))
                     
                     isTyping = true
-                    // 4. Typewriter Effect (Ek-ek character karke likhna)
                     for (char in reply) {
                         val currentMsg = messages.find { it.id == newMsgId }
                         if (currentMsg != null) {
                             val index = messages.indexOf(currentMsg)
                             messages[index] = currentMsg.copy(text = currentMsg.text + char)
                         }
-                        delay(15L) // Speed control (15 milliseconds per character)
+                        delay(15L)
                     }
                     isTyping = false
                 } else {
@@ -304,7 +297,6 @@ fun AIModalScreen(onClose: () -> Unit) {
                     }
                 }
 
-                // AI Thinking Indicator (3 Dots animation)
                 if (isAiThinking) {
                     item {
                         Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
@@ -325,7 +317,7 @@ fun AIModalScreen(onClose: () -> Unit) {
                 }
             }
 
-            // Input Area
+            // Input Area (Hamesha enabled rahega)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -343,7 +335,7 @@ fun AIModalScreen(onClose: () -> Unit) {
                         value = promptText,
                         onValueChange = { promptText = it },
                         modifier = Modifier.padding(16.dp),
-                        enabled = !isAiThinking && !isTyping,
+                        // Yahan se "enabled = false" hata diya hai, ab hamesha type kar sakte ho
                         decorationBox = { inner -> 
                             if (promptText.isEmpty()) Text("Ask ChatArena AI...", color = SubTextColor)
                             inner()
@@ -353,9 +345,13 @@ fun AIModalScreen(onClose: () -> Unit) {
                 Spacer(modifier = Modifier.width(12.dp))
                 Surface(
                     shape = CircleShape,
-                    color = if (promptText.isNotBlank() && !isAiThinking && !isTyping) PrimaryBlue else SubTextColor.copy(alpha = 0.5f),
-                    modifier = Modifier.size(48.dp).clickable(enabled = promptText.isNotBlank() && !isAiThinking && !isTyping) {
-                        sendMessage()
+                    // Button ka color sirf text par depend karega, AI busy hai ya nahi uspar nahi
+                    color = if (promptText.isNotBlank()) PrimaryBlue else SubTextColor.copy(alpha = 0.5f),
+                    modifier = Modifier.size(48.dp).clickable(enabled = promptText.isNotBlank()) {
+                        // Agar AI busy nahi hai, tabhi send hoga
+                        if (!isAiThinking && !isTyping) {
+                            sendMessage()
+                        }
                     }
                 ) {
                     Box(contentAlignment = Alignment.Center) { Text("➤", color = Color.White) }
@@ -365,7 +361,6 @@ fun AIModalScreen(onClose: () -> Unit) {
     }
 }
 
-// Chhota sa animation function (3 Dots ke liye)
 @Composable
 fun TypingDotsAnimation() {
     var dotCount by remember { mutableStateOf(1) }
@@ -377,7 +372,6 @@ fun TypingDotsAnimation() {
     }
     Text(text = ".".repeat(dotCount), color = TextColor, fontSize = 20.sp, fontWeight = FontWeight.Bold)
 }
-
 
 @Composable
 fun SettingsModal(email: String, onClose: () -> Unit, onLogout: () -> Unit) {
