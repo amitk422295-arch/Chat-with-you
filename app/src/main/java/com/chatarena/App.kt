@@ -8,16 +8,31 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import com.chatarena.ui.auth.AuthScreen
 import com.chatarena.ui.main.MainAppScreen
+import com.chatarena.utils.TokenManager
 
-// Dummy User Data class (Baad me API se aayega)
+// User Data class
 data class User(val userCode: String, val fullName: String)
 
 @Composable
 fun AppRoot() {
-    // App State
-    var currentUser by remember { mutableStateOf<User?>(null) }
+    val context = LocalContext.current
+    
+    // App start hote hi check karo ki token saved hai ya nahi
+    var currentUser by remember {
+        mutableStateOf(
+            if (TokenManager.isLoggedIn(context)) {
+                User(
+                    userCode = TokenManager.getUserCode(context) ?: "user",
+                    fullName = TokenManager.getFullName(context) ?: "User"
+                )
+            } else {
+                null
+            }
+        )
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         // ==========================================
@@ -26,12 +41,21 @@ fun AppRoot() {
         if (currentUser == null) {
             AuthScreen(
                 onLoginSuccess = {
-                    // Jab login ho jaye, toh dummy user set karo (baad me API se real user aayega)
-                    currentUser = User("user_123", "Amit")
+                    // Jab login ho jaye, toh TokenManager se data utha kar state update karo
+                    currentUser = User(
+                        userCode = TokenManager.getUserCode(context) ?: "user",
+                        fullName = TokenManager.getFullName(context) ?: "User"
+                    )
                 }
             )
         } else {
-            MainAppScreen()
+            MainAppScreen(
+                // Logout function pass kiya hai (Agle step me isko MainAppScreen me jodenge)
+                onLogout = {
+                    TokenManager.logout(context) // Token clear karo
+                    currentUser = null // Wapas login screen par bhejo
+                }
+            )
         }
     }
 }
