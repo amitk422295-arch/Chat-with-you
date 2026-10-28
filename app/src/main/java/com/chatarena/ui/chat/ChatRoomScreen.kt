@@ -261,8 +261,8 @@ fun ChatRoomScreen(
                     modifier = Modifier.background(
                         if (isKeyLoaded) PrimaryBlue else Color.Gray,
                         CircleShape
-                    ),
-                    enabled = isKeyLoaded
+                    )
+                    // Yahan se enabled = isKeyLoaded hata diya gaya hai
                 ) {
                     Icon(Icons.Default.Send, contentDescription = "Send", tint = Color.White)
                 }
