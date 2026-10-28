@@ -77,7 +77,8 @@ fun MainAppScreen(onLogout: () -> Unit) {
         val dbChatIds = mutableSetOf<String>()
 
         // Pehle Database se chats uthao (Sabse latest and reliable text yahan se aayega)
-        recentMessagesEntity.forEach { entity ->
+        // FIX: Using standard 'for' loop to avoid compiler inference errors
+        for (entity in recentMessagesEntity) {
             dbChatIds.add(entity.chatId)
             val metadata = serverMetadata[entity.chatId]
             
@@ -97,7 +98,8 @@ fun MainAppScreen(onLogout: () -> Unit) {
         }
 
         // Fir wo chats add karo jo abhi tak DB me save nahi hue hain (Naye phone me login karne par)
-        serverMetadata.values.forEach { metadata ->
+        // FIX: Using standard 'for' loop
+        for (metadata in serverMetadata.values) {
             if (!dbChatIds.contains(metadata.id)) {
                 var subtitle = metadata.subtitle
                 if (subtitle.startsWith("E2E:")) subtitle = "🔒 Message"
@@ -118,21 +120,26 @@ fun MainAppScreen(onLogout: () -> Unit) {
         ChatWebSocketClient.getRecentChats { response ->
             if (response != null && response.has("success") && response.get("success").asBoolean) {
                 val chatsArray = response.getAsJsonArray("chats")
-                chatsArray?.forEach { element ->
-                    try {
-                        val chatObj = element.asJsonObject
-                        val id = chatObj.get("targetCode")?.asString ?: chatObj.get("userCode")?.asString ?: ""
-                        val name = chatObj.get("name")?.asString ?: id
-                        val subtitle = chatObj.get("lastMessage")?.asString ?: ""
-                        val unreadCount = chatObj.get("unreadCount")?.asInt ?: 0
-                        
-                        if (id.isNotEmpty()) {
-                            serverMetadata[id] = ChatItem(
-                                type = "user", id = id, name = name, subtitle = subtitle, unreadCount = unreadCount
-                            )
+                
+                // FIX: Standard for-loop instead of .forEach to resolve Kotlin compilation error
+                if (chatsArray != null) {
+                    for (i in 0 until chatsArray.size()) {
+                        val element = chatsArray.get(i)
+                        try {
+                            val chatObj = element.asJsonObject
+                            val id = chatObj.get("targetCode")?.asString ?: chatObj.get("userCode")?.asString ?: ""
+                            val name = chatObj.get("name")?.asString ?: id
+                            val subtitle = chatObj.get("lastMessage")?.asString ?: ""
+                            val unreadCount = chatObj.get("unreadCount")?.asInt ?: 0
+                            
+                            if (id.isNotEmpty()) {
+                                serverMetadata[id] = ChatItem(
+                                    type = "user", id = id, name = name, subtitle = subtitle, unreadCount = unreadCount
+                                )
+                            }
+                        } catch (e: Exception) {
+                            e.printStackTrace()
                         }
-                    } catch (e: Exception) {
-                        e.printStackTrace()
                     }
                 }
             }
@@ -161,7 +168,6 @@ fun MainAppScreen(onLogout: () -> Unit) {
                     }
 
                     // 2. Database me Message Save Karo! 
-                    // (Jaise hi yahan save hoga, UI ka 'recentMessagesEntity' apne aap update ho jayega)
                     val senderPubKey = CryptoManager.getPublicKeyFromDisk(context, msg.senderCode ?: "")
                     var decryptedText = msg.text
                     
@@ -246,7 +252,6 @@ fun MainAppScreen(onLogout: () -> Unit) {
                     beyondBoundsPageCount = 1 
                 ) { page ->
                     when (page) {
-                        // UPDATE: Ab yahan Real-time combined 'chatList' pass ho rahi hai
                         0 -> ChatListScreen(
                             chatList = chatList,
                             onItemClick = { clickedChat -> activeChat = clickedChat }
@@ -273,7 +278,7 @@ fun MainAppScreen(onLogout: () -> Unit) {
             }
         }
 
-        // Chat Room Screen (Jab kisi chat par click hoga)
+        // Chat Room Screen
         if (activeChat != null) {
             ChatRoomScreen(
                 chatItem = activeChat!!,
