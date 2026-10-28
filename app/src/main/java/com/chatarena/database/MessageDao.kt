@@ -24,4 +24,17 @@ interface MessageDao {
     // 4. Chat delete karne ke liye (Baad me kaam aayega)
     @Query("DELETE FROM messages WHERE chatId = :chatId")
     suspend fun clearChat(chatId: String)
+
+    // 5. NAYA: Home screen par Inbox (Recent Chats) dikhane ke liye
+    // Yeh query har chatId ka sabse aakhiri (latest timestamp wala) message fetch karegi
+    @Query("""
+        SELECT m1.* FROM messages m1 
+        INNER JOIN (
+            SELECT chatId, MAX(createdAt) as maxTime 
+            FROM messages 
+            GROUP BY chatId
+        ) m2 ON m1.chatId = m2.chatId AND m1.createdAt = m2.maxTime 
+        ORDER BY m1.createdAt DESC
+    """)
+    fun getRecentChats(): Flow<List<MessageEntity>>
 }
