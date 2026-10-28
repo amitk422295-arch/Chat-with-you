@@ -51,9 +51,13 @@ fun MainAppScreen(onLogout: () -> Unit) {
     var showAIModal by remember { mutableStateOf(false) }
     var showSettingsModal by remember { mutableStateOf(false) }
     var showCreateGroup by remember { mutableStateOf(false) }
+    
+    // NAYA: Active Chat state (Jab user kisi chat par click karega)
+    var activeChat by remember { mutableStateOf<ChatItem?>(null) }
 
     Box(modifier = Modifier.fillMaxSize().background(BgColor)) {
         
+        // Main App UI
         if (!showAIModal) {
             Column(modifier = Modifier.fillMaxSize().systemBarsPadding()) { 
                 // Top Navbar
@@ -101,7 +105,11 @@ fun MainAppScreen(onLogout: () -> Unit) {
                     beyondBoundsPageCount = 1 
                 ) { page ->
                     when (page) {
-                        0 -> ChatListScreen(chatList = emptyList())
+                        // YAHAN CHANGE HUA HAI: onItemClick add kiya gaya hai
+                        0 -> ChatListScreen(
+                            chatList = emptyList(),
+                            onItemClick = { clickedChat -> activeChat = clickedChat }
+                        )
                         1 -> ReelsWebView(url = "https://reel-center-2.onrender.com")
                         2 -> CallsPlaceholder()
                     }
@@ -122,6 +130,14 @@ fun MainAppScreen(onLogout: () -> Unit) {
                     }
                 }
             }
+        }
+
+        // NAYA: Chat Room Screen (Jab activeChat null nahi hai toh ye pura screen cover kar lega)
+        if (activeChat != null) {
+            ChatRoomScreen(
+                chatItem = activeChat!!,
+                onBack = { activeChat = null }
+            )
         }
 
         if (showAIModal) {
@@ -193,10 +209,10 @@ fun AIModalScreen(onClose: () -> Unit) {
 
     fun sendMessage() {
         val text = promptText.trim()
-        if (text.isEmpty() || isAiThinking || isTyping) return // Prevent sending if AI is busy
+        if (text.isEmpty() || isAiThinking || isTyping) return 
 
         messages.add(AIMessage(Random.nextInt().toString(), text, true))
-        promptText = "" // Text clear ho gaya, par keyboard khula rahega
+        promptText = "" 
         isAiThinking = true
 
         val token = TokenManager.getToken(context) ?: ""
@@ -335,7 +351,6 @@ fun AIModalScreen(onClose: () -> Unit) {
                         value = promptText,
                         onValueChange = { promptText = it },
                         modifier = Modifier.padding(16.dp),
-                        // Yahan se "enabled = false" hata diya hai, ab hamesha type kar sakte ho
                         decorationBox = { inner -> 
                             if (promptText.isEmpty()) Text("Ask ChatArena AI...", color = SubTextColor)
                             inner()
@@ -345,10 +360,8 @@ fun AIModalScreen(onClose: () -> Unit) {
                 Spacer(modifier = Modifier.width(12.dp))
                 Surface(
                     shape = CircleShape,
-                    // Button ka color sirf text par depend karega, AI busy hai ya nahi uspar nahi
                     color = if (promptText.isNotBlank()) PrimaryBlue else SubTextColor.copy(alpha = 0.5f),
                     modifier = Modifier.size(48.dp).clickable(enabled = promptText.isNotBlank()) {
-                        // Agar AI busy nahi hai, tabhi send hoga
                         if (!isAiThinking && !isTyping) {
                             sendMessage()
                         }
