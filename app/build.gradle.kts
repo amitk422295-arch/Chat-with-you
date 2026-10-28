@@ -1,6 +1,7 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("com.google.devtools.ksp") version "1.9.22-1.0.17" // NAYA: Room ke liye zaroori hai
 }
 
 android {
@@ -27,7 +28,6 @@ android {
     }
     kotlinOptions {
         jvmTarget = "1.8"
-        // नीचे दी गई यह लाइन एरर को ठीक करेगी
         freeCompilerArgs += listOf("-opt-in=androidx.compose.foundation.ExperimentalFoundationApi")
     }
 }
@@ -50,8 +50,14 @@ dependencies {
     implementation("androidx.camera:camera-lifecycle:${cameraxVersion}")
     implementation("androidx.camera:camera-view:${cameraxVersion}")
 
-    // Retrofit Dependencies (नई लाइनें जोड़ी गई हैं)
+    // Retrofit Dependencies
     implementation("com.squareup.retrofit2:retrofit:2.9.0")
     implementation("com.squareup.retrofit2:converter-gson:2.9.0")
     implementation("com.squareup.okhttp3:logging-interceptor:4.11.0")
+
+    // NAYA: Room Database Dependencies
+    val roomVersion = "2.6.1"
+    implementation("androidx.room:room-runtime:$roomVersion")
+    implementation("androidx.room:room-ktx:$roomVersion")
+    ksp("androidx.room:room-compiler:$roomVersion")
 }
