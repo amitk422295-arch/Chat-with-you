@@ -2,51 +2,60 @@ package com.chatarena.network
 
 import android.util.Log
 import com.google.gson.Gson
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
+import com.google.gson.JsonObject
+import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.launch
 import okhttp3.*
-import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 
 object ChatWebSocketClient {
 
-    // Tera Elixir Backend URL (socket.js se liya hai)
     private const val BASE_WS_URL = "wss://chatarena-chat.onrender.com/ws"
     private const val TAG = "ChatSocket"
+    private const val CALLBACK_TIMEOUT_MS = 30000L // 30 seconds
 
     private val gson = Gson()
     private val client = OkHttpClient.Builder()
-        .readTimeout(0, TimeUnit.MILLISECONDS) // WebSocket ke liye timeout nahi hona chahiye
+        .readTimeout(0, TimeUnit.MILLISECONDS)
         .build()
 
     private var webSocket: WebSocket? = null
     private var heartbeatJob: Job? = null
     private var reconnectJob: Job? = null
     
-    // State Management (Native Tarika)
     private val _connectionState = MutableStateFlow(false)
     val connectionState: StateFlow<Boolean> = _connectionState
 
-    // Events (Messages, Typing, etc.) receive karne ke liye Flow
-    private val _socketEvents = MutableSharedFlow<SocketResponse>(extraBufferCapacity = 50)
+    // Sabhi incoming events (new-message, typing, etc.) ke liye Flow
+    private val _socketEvents = MutableSharedFlow<SocketResponse>(extraBufferCapacity = 100)
     val socketEvents: SharedFlow<SocketResponse> = _socketEvents
 
     private var userCode: String = ""
     private var token: String = ""
-    private val scope = CoroutineScope(Dispatchers.IO)
+    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var isIntentionalDisconnect = false
 
-    // 1. Connect Function (Jab app khule ya login ho)
-    fun connect(userCode: String, token: String) {
-        this.userCode = userCode
-        this.token = token
+    // Callback Management (JS ke cbId jaisa)
+    private val cbIdCounter = AtomicInteger(1)
+    private val callbacks = ConcurrentHashMap<Int, CallbackData>()
+
+    private data class CallbackData(
+        val onResult: (JsonObject?) -> Unit,
+        val timeoutJob: Job
+    )
+
+    // ==========================================
+    // CONNECTION MANAGEMENT
+    // ==========================================
+
+    fun connect(uCode: String, tkn: String) {
+        this.userCode = uCode
+        this.token = tkn
         this.isIntentionalDisconnect = false
 
         if (webSocket != null) {
@@ -66,11 +75,30 @@ object ChatWebSocketClient {
 
             override fun onMessage(webSocket: WebSocket, text: String) {
                 try {
-                    val response = gson.fromJson(text, SocketResponse::class.java)
-                    if (response.type == "ping" || response.type == "pong") return
+                    val jsonObject = gson.fromJson(text, JsonObject::class.java)
+                    val type = jsonObject.get("type")?.asString ?: return
                     
-                    // Event ko Flow me emit karo
-                    _socketEvents.tryEmit(response)
+                    if (type == "ping" || type == "pong") return
+
+                    // 1. Callback Response Check
+                    if (jsonObject.has("cbId")) {
+                        val cbId = jsonObject.get("cbId").asInt
+                        val payload = jsonObject.getAsJsonObject("payload")
+                        finishCallback(cbId, payload)
+                        return
+                    }
+
+                    // 2. Message Sent Callback (Special Case from chatStore.js)
+                    if (type == "message-sent-callback") {
+                        _socketEvents.tryEmit(SocketResponse(type, gson.fromJson(jsonObject.get("payload"), SocketPayload::class.java)))
+                        return
+                    }
+
+                    // 3. Normal Events (new-message, typing, status, etc.)
+                    val payload = jsonObject.getAsJsonObject("payload")
+                    val socketPayload = gson.fromJson(payload, SocketPayload::class.java)
+                    _socketEvents.tryEmit(SocketResponse(type, socketPayload))
+
                 } catch (e: Exception) {
                     Log.e(TAG, "Parse error: ${e.message}")
                 }
@@ -92,7 +120,6 @@ object ChatWebSocketClient {
         })
     }
 
-    // 2. Disconnect (Jab user logout kare)
     fun disconnect() {
         isIntentionalDisconnect = true
         heartbeatJob?.cancel()
@@ -100,31 +127,103 @@ object ChatWebSocketClient {
         webSocket?.close(1000, "User logged out")
         webSocket = null
         _connectionState.value = false
+        
+        // Clear all pending callbacks
+        callbacks.forEach { (_, data) -> data.timeoutJob.cancel() }
+        callbacks.clear()
     }
 
-    // 3. Send Message
-    fun sendMessage(payload: SendMessagePayload): Boolean {
-        val event = SocketEvent(
-            type = "send-message",
-            payload = payload
+    // ==========================================
+    // CALLBACK MANAGEMENT (JS ka cbId logic)
+    // ==========================================
+
+    private fun finishCallback(cbId: Int, payload: JsonObject?) {
+        val callbackData = callbacks.remove(cbId) ?: return
+        callbackData.timeoutJob.cancel()
+        try {
+            callbackData.onResult(payload)
+        } catch (e: Exception) {
+            Log.e(TAG, "Callback execution failed: ${e.message}")
+        }
+    }
+
+    // ==========================================
+    // EMIT FUNCTIONS (Naye Events)
+    // ==========================================
+
+    // 1. Get Target User's Public Key (Encryption ke liye)
+    fun getPublicKey(targetCode: String, onResult: (String?) -> Unit) {
+        val cbId = cbIdCounter.getAndIncrement()
+        val payload = JsonObject().apply { addProperty("targetCode", targetCode) }
+        val event = mapOf("type" to "get-public-key", "payload" to payload, "cbId" to cbId)
+        
+        startCallbackTimeout(cbId) { onResult(null) }
+        webSocket?.send(gson.toJson(event))
+    }
+
+    // 2. Send Encrypted Message
+    fun sendMessage(payload: SendMessagePayload, onResult: (JsonObject?) -> Unit) {
+        val cbId = cbIdCounter.getAndIncrement()
+        val event = mapOf("type" to "send-message", "payload" to payload, "cbId" to cbId)
+        
+        startCallbackTimeout(cbId, onResult)
+        webSocket?.send(gson.toJson(event))
+    }
+
+    // 3. Send Typing Status
+    fun sendTyping(targetCode: String) {
+        val event = mapOf("type" to "typing", "payload" to mapOf("targetCode" to targetCode))
+        webSocket?.send(gson.toJson(event))
+    }
+
+    fun sendStopTyping(targetCode: String) {
+        val event = mapOf("type" to "stop-typing", "payload" to mapOf("targetCode" to targetCode))
+        webSocket?.send(gson.toJson(event))
+    }
+
+    // 4. Mark Message as Read (Blue Ticks)
+    fun markMessageRead(messageId: String, senderCode: String) {
+        val event = mapOf("type" to "mark-message-read", "payload" to mapOf("messageId" to messageId, "senderCode" to senderCode))
+        webSocket?.send(gson.toJson(event))
+    }
+
+    fun sendMessageReceived(messageId: String, senderCode: String) {
+        val event = mapOf("type" to "message-received", "payload" to mapOf("messageId" to messageId, "senderCode" to senderCode))
+        webSocket?.send(gson.toJson(event))
+    }
+
+    // ==========================================
+    // CORE UTILITIES
+    // ==========================================
+
+    private fun startCallbackTimeout(cbId: Int, onResult: (JsonObject?) -> Unit) {
+        val timeoutJob = scope.launch {
+            delay(CALLBACK_TIMEOUT_MS)
+            if (callbacks.containsKey(cbId)) {
+                callbacks.remove(cbId)
+                Log.w(TAG, "Callback $cbId timed out.")
+                withContext(Dispatchers.Main) { onResult(null) }
+            }
+        }
+        
+        val callbackData = CallbackData(
+            onResult = { payload -> scope.launch { withContext(Dispatchers.Main) { onResult(payload) } } },
+            timeoutJob = timeoutJob
         )
-        val json = gson.toJson(event)
-        return webSocket?.send(json) ?: false
+        callbacks[cbId] = callbackData
     }
 
-    // 4. Heartbeat (Har 30 second me ping bhejna)
     private fun startHeartbeat() {
         heartbeatJob?.cancel()
         heartbeatJob = scope.launch {
             while (true) {
                 delay(30000)
-                val ping = gson.toJson(SocketEvent(type = "ping"))
+                val ping = gson.toJson(mapOf("type" to "ping"))
                 webSocket?.send(ping)
             }
         }
     }
 
-    // 5. Reconnect Logic (Agar net chala jaye)
     private fun scheduleReconnect() {
         reconnectJob?.cancel()
         reconnectJob = scope.launch {
