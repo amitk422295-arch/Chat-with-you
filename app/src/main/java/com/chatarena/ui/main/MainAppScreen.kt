@@ -9,7 +9,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState // यह नया इम्पोर्ट जोड़ा है
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
@@ -36,11 +36,12 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import com.chatarena.ChatItem
 import com.chatarena.ui.auth.*
+import com.chatarena.utils.TokenManager // Naya Import
 import kotlinx.coroutines.launch
 import kotlin.random.Random
 
 @Composable
-fun MainAppScreen() {
+fun MainAppScreen(onLogout: () -> Unit) { // Yahan onLogout add kiya gaya hai
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val pagerState = rememberPagerState(initialPage = 0, pageCount = { 3 })
@@ -133,11 +134,11 @@ fun MainAppScreen() {
         // Settings Modal
         if (showSettingsModal) {
             SettingsModal(
-                email = "user@example.com",
+                email = TokenManager.getEmail(context) ?: "user@example.com", // Real email fetch ho rahi hai
                 onClose = { showSettingsModal = false },
                 onLogout = { 
                     showSettingsModal = false
-                    Toast.makeText(context, "Logged out", Toast.LENGTH_SHORT).show()
+                    onLogout() // Token delete karke Login screen par bhej dega
                 }
             )
         }
@@ -182,7 +183,7 @@ fun AIModalScreen(onClose: () -> Unit) {
     val messages = remember { mutableStateListOf(AIMessage("0", "Hi there! I am ChatArena AI. How can I help you today?", false)) }
     val focusManager = LocalFocusManager.current
     
-    // --- ऑटो-स्क्रॉल के लिए जोड़ा गया कोड शुरू ---
+    // Auto-scroll ka logic
     val listState = rememberLazyListState()
 
     LaunchedEffect(messages.size) {
@@ -190,7 +191,6 @@ fun AIModalScreen(onClose: () -> Unit) {
             listState.animateScrollToItem(messages.size - 1)
         }
     }
-    // --- ऑटो-स्क्रॉल के लिए जोड़ा गया कोड खत्म ---
 
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -224,13 +224,13 @@ fun AIModalScreen(onClose: () -> Unit) {
 
             // Chat Area
             LazyColumn(
-                state = listState, // यहाँ लिस्ट का स्टेट पास किया है
+                state = listState,
                 modifier = Modifier
                     .weight(1f)
                     .padding(horizontal = 16.dp)
                     .pointerInput(Unit) {
                         detectTapGestures(onTap = {
-                            focusManager.clearFocus() // Bahar click karne par keyboard band
+                            focusManager.clearFocus() 
                         })
                     },
                 verticalArrangement = Arrangement.spacedBy(8.dp),
