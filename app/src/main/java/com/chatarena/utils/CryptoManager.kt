@@ -39,6 +39,9 @@ object CryptoManager {
     private const val E2E_PREFIX = "E2E:"
     private const val MEDIA_CHUNK_SIZE = 5 * 1024 * 1024 // 5MB
     private const val CLOUDINARY_CLOUD = "gr8tp1tg"
+    
+    // NAYA: Disk Cache ke liye SharedPreferences ka naam
+    private const val PREF_KEYS_CACHE = "ChatArenaKeysCache"
 
     // --- Caching (With Eviction just like JS) ---
     private val publicKeyCache = object : LruCache<String, String>(200) {}
@@ -104,6 +107,36 @@ object CryptoManager {
     fun hasLocalKeys(context: Context): Boolean {
         val prefs = context.getSharedPreferences("ChatArenaPrefs", Context.MODE_PRIVATE)
         return prefs.getString("chatAppPrivateKey", null) != null && prefs.getString("chatAppPublicKey", null) != null
+    }
+
+    // ==========================================
+    // 🚀 NAYA: DISK CACHE FOR PUBLIC KEYS (WhatsApp Jaisa Speed)
+    // ==========================================
+
+    fun savePublicKeyToDisk(context: Context, targetCode: String, publicKey: String) {
+        // 1. RAM me save karo (LruCache)
+        publicKeyCache.put(targetCode, publicKey)
+        
+        // 2. Disk me save karo (SharedPreferences)
+        val prefs = context.getSharedPreferences(PREF_KEYS_CACHE, Context.MODE_PRIVATE)
+        prefs.edit().putString(targetCode, publicKey).apply()
+        Log.d(TAG, "Key saved to disk for: $targetCode")
+    }
+
+    fun getPublicKeyFromDisk(context: Context, targetCode: String): String? {
+        // 1. Pehle RAM me check karo (Fastest)
+        publicKeyCache.get(targetCode)?.let { return it }
+        
+        // 2. Agar RAM me nahi hai, toh Disk se nikalo
+        val prefs = context.getSharedPreferences(PREF_KEYS_CACHE, Context.MODE_PRIVATE)
+        val diskKey = prefs.getString(targetCode, null)
+        
+        if (diskKey != null) {
+            // Disk se mila, ab RAM me bhi save kar do taaki agli baar 0ms lage
+            publicKeyCache.put(targetCode, diskKey)
+            return diskKey
+        }
+        return null
     }
 
     // ==========================================
@@ -332,7 +365,6 @@ object CryptoManager {
             }
 
             // 2. Encrypt & Upload Chunks
-            // FIX: .toInt() add kiya gaya hai
             val totalChunks = maxOf(1, ((file.length() + MEDIA_CHUNK_SIZE - 1) / MEDIA_CHUNK_SIZE).toInt())
             val urls = mutableListOf<String>()
 
@@ -346,7 +378,6 @@ object CryptoManager {
                     fis.read(chunkBytes)
                 }
 
-                // AAD: Uint32Array([i]) -> 4 bytes little-endian
                 val aad = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt(i).array()
 
                 val cipher = Cipher.getInstance("AES/GCM/NoPadding")
@@ -356,7 +387,6 @@ object CryptoManager {
                 
                 val ciphertext = cipher.doFinal(chunkBytes)
 
-                // Combined: IV (12) + Ciphertext
                 val combined = ByteArray(iv.size + ciphertext.size)
                 System.arraycopy(iv, 0, combined, 0, iv.size)
                 System.arraycopy(ciphertext, 0, combined, iv.size, ciphertext.size)
@@ -404,12 +434,10 @@ object CryptoManager {
                 val cipher = Cipher.getInstance("AES/GCM/NoPadding")
                 cipher.init(Cipher.DECRYPT_MODE, sharedKey, GCMParameterSpec(128, iv))
                 
-                // FIX: "val cannot be reassigned" error solved by using try-catch as expression
                 val plain = try {
                     cipher.updateAAD(aad)
                     cipher.doFinal(ciphertext)
                 } catch (e: Exception) {
-                    // Fallback without AAD (just in case)
                     val cipherFallback = Cipher.getInstance("AES/GCM/NoPadding")
                     cipherFallback.init(Cipher.DECRYPT_MODE, sharedKey, GCMParameterSpec(128, iv))
                     cipherFallback.doFinal(ciphertext)
