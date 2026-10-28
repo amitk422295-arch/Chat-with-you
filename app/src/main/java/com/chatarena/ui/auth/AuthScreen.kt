@@ -28,6 +28,7 @@ import com.chatarena.network.OTPRequest
 import com.chatarena.network.RetrofitClient
 import com.chatarena.network.UpdateProfileRequest
 import com.chatarena.network.VerifyRequest
+import com.chatarena.utils.CryptoManager // NAYA IMPORT
 import com.chatarena.utils.TokenManager
 import kotlinx.coroutines.launch
 
@@ -108,7 +109,7 @@ fun AuthScreen(onLoginSuccess: () -> Unit = {}) {
                     val user = body?.user
 
                     if (token != null && user != null) {
-                        // Token save karo
+                        // 1. Token save karo
                         TokenManager.saveUserData(
                             context = context,
                             token = token,
@@ -117,12 +118,33 @@ fun AuthScreen(onLoginSuccess: () -> Unit = {}) {
                             fullName = user.fullName
                         )
 
-                        // CHECK KARO: Agar mobile number hai, toh purana user hai
+                        // 2. E2E Keys Generate karo (agar pehle se nahi hain toh)
+                        val myPublicKey = CryptoManager.ensureE2EKeys(context)
+                        val serverPublicKey = user.publicKey ?: ""
+
+                        // 3. Check karo: Purana user hai ya Naya
                         if (!user.mobile.isNullOrEmpty()) {
+                            // Purana User hai
+                            // Agar server par public key nahi hai ya match nahi kar rahi, toh sync karo
+                            if (serverPublicKey.isEmpty() || serverPublicKey != myPublicKey) {
+                                try {
+                                    RetrofitClient.apiService.updateProfile(
+                                        token = "Bearer $token",
+                                        request = UpdateProfileRequest(
+                                            fullName = user.fullName,
+                                            mobile = user.mobile,
+                                            publicKey = myPublicKey
+                                        )
+                                    )
+                                } catch (e: Exception) {
+                                    // Silent fail, login continue karo
+                                }
+                            }
+                            
                             toast("Welcome back!")
                             onLoginSuccess()
                         } else {
-                            // Naya user hai, profile setup dikhao
+                            // Naya User hai
                             setupName = if (user.fullName != user.userCode) user.fullName else ""
                             isProfileSetup = true
                         }
@@ -151,9 +173,17 @@ fun AuthScreen(onLoginSuccess: () -> Unit = {}) {
         scope.launch {
             try {
                 val savedToken = TokenManager.getToken(context) ?: ""
+                // 1. Naye user ke liye Public Key nikalo
+                val myPublicKey = CryptoManager.ensureE2EKeys(context)
+
+                // 2. Backend par save karo
                 val response = RetrofitClient.apiService.updateProfile(
                     token = "Bearer $savedToken",
-                    request = UpdateProfileRequest(fullName = cleanName, mobile = cleanDigits)
+                    request = UpdateProfileRequest(
+                        fullName = cleanName, 
+                        mobile = cleanDigits,
+                        publicKey = myPublicKey // Yahan key bhej rahe hain
+                    )
                 )
                 
                 if (response.isSuccessful && response.body()?.success == true) {
