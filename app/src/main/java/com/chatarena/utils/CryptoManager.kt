@@ -8,7 +8,6 @@ import android.os.Build
 import android.util.Base64
 import android.util.Log
 import android.util.LruCache
-import com.google.gson.Gson
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.*
@@ -333,11 +332,12 @@ object CryptoManager {
             }
 
             // 2. Encrypt & Upload Chunks
-            val totalChunks = maxOf(1, (file.length() + MEDIA_CHUNK_SIZE - 1) / MEDIA_CHUNK_SIZE)
+            // FIX: .toInt() add kiya gaya hai
+            val totalChunks = maxOf(1, ((file.length() + MEDIA_CHUNK_SIZE - 1) / MEDIA_CHUNK_SIZE).toInt())
             val urls = mutableListOf<String>()
 
             for (i in 0 until totalChunks) {
-                val start = i * MEDIA_CHUNK_SIZE
+                val start = i.toLong() * MEDIA_CHUNK_SIZE
                 val end = minOf(start + MEDIA_CHUNK_SIZE.toLong(), file.length())
                 val chunkBytes = ByteArray((end - start).toInt())
                 
@@ -404,16 +404,17 @@ object CryptoManager {
                 val cipher = Cipher.getInstance("AES/GCM/NoPadding")
                 cipher.init(Cipher.DECRYPT_MODE, sharedKey, GCMParameterSpec(128, iv))
                 
-                val plain: ByteArray
-                try {
+                // FIX: "val cannot be reassigned" error solved by using try-catch as expression
+                val plain = try {
                     cipher.updateAAD(aad)
-                    plain = cipher.doFinal(ciphertext)
+                    cipher.doFinal(ciphertext)
                 } catch (e: Exception) {
                     // Fallback without AAD (just in case)
                     val cipherFallback = Cipher.getInstance("AES/GCM/NoPadding")
                     cipherFallback.init(Cipher.DECRYPT_MODE, sharedKey, GCMParameterSpec(128, iv))
-                    plain = cipherFallback.doFinal(ciphertext)
+                    cipherFallback.doFinal(ciphertext)
                 }
+                
                 outputStream.write(plain)
             }
 
