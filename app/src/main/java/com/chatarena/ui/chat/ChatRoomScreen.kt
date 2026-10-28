@@ -25,6 +25,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.chatarena.ChatItem
+import com.chatarena.database.AppDatabase
+import com.chatarena.database.MessageEntity
 import com.chatarena.network.ChatWebSocketClient
 import com.chatarena.network.Message
 import com.chatarena.network.SendMessagePayload
@@ -37,7 +39,9 @@ import com.chatarena.ui.camera.CameraScreen
 import com.chatarena.ui.chat.MessageBubble
 import com.chatarena.utils.CryptoManager
 import com.chatarena.utils.TokenManager
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.UUID
 
 @Composable
@@ -55,14 +59,42 @@ fun ChatRoomScreen(
     var messageText by remember { mutableStateOf("") }
     var showCamera by remember { mutableStateOf(false) }
     
-    val messages = remember { mutableStateListOf<Message>() }
-    
+    // 1. Database Initialize karo
+    val db = AppDatabase.getDatabase(context)
+    val messageDao = db.messageDao()
+
+    // 2. Database se messages observe karo (Flow)
+    val messagesEntity by messageDao.getMessagesForChat(chatItem.id).collectAsState(initial = emptyList())
+
+    // 3. Entity ko UI Model (Message) me convert karo
+    val messages = messagesEntity.map { entity ->
+        Message(
+            messageId = entity.messageId,
+            clientMessageId = entity.clientMessageId,
+            text = entity.decryptedText,
+            messageType = entity.messageType,
+            senderCode = entity.senderCode,
+            receiverCode = entity.receiverCode,
+            mine = entity.senderCode == currentUserCode,
+            status = entity.status,
+            createdAt = entity.createdAt,
+            replyTo = entity.replyTo,
+            isDeleted = entity.isDeleted
+        )
+    }
+
     // States for Encryption Key
     var targetPublicKey by remember { mutableStateOf<String?>(null) }
     var isKeyLoaded by remember { mutableStateOf(false) }
     var isKeyLoading by remember { mutableStateOf(true) }
 
-    // Function to fetch key from WebSocket (agar disk me na mile)
+    // Auto Scroll to bottom jab naya message aaye
+    LaunchedEffect(messages.size) {
+        if (messages.isNotEmpty()) {
+            listState.animateScrollToItem(messages.size - 1)
+        }
+    }
+
     fun fetchPublicKey() {
         isKeyLoading = true
         ChatWebSocketClient.getPublicKey(chatItem.id) { pubKey ->
@@ -70,7 +102,6 @@ fun ChatRoomScreen(
             isKeyLoaded = pubKey != null
             isKeyLoading = false
             
-            // NAYA: Jab key mil jaye, toh disk me save kar do
             if (pubKey != null) {
                 CryptoManager.savePublicKeyToDisk(context, chatItem.id, pubKey)
             }
@@ -80,16 +111,14 @@ fun ChatRoomScreen(
     LaunchedEffect(Unit) {
         ChatWebSocketClient.connect(currentUserCode, token)
         
-        // NAYA: Pehle Disk (Local Memory) se key check karo
+        // Disk se key load karo (WhatsApp Speed)
         val cachedKey = CryptoManager.getPublicKeyFromDisk(context, chatItem.id)
         
         if (cachedKey != null) {
-            // Agar disk me mil gayi, toh instantly load karo (WhatsApp Speed)
             targetPublicKey = cachedKey
             isKeyLoaded = true
             isKeyLoading = false
         } else {
-            // Agar nahi mili, toh WebSocket se fetch karo
             fetchPublicKey()
         }
 
@@ -107,13 +136,24 @@ fun ChatRoomScreen(
                             targetPubKeyBase64 = senderPubKey
                         )
                         
-                        val decryptedMsg = newMsg.copy(text = decryptedText, mine = false)
+                        // Naya message database me save karo
+                        val entity = MessageEntity(
+                            messageId = newMsg.messageId ?: newMsg.clientMessageId ?: UUID.randomUUID().toString(),
+                            clientMessageId = newMsg.clientMessageId,
+                            chatId = chatItem.id,
+                            senderCode = newMsg.senderCode ?: "",
+                            receiverCode = newMsg.receiverCode,
+                            encryptedText = newMsg.text,
+                            decryptedText = decryptedText,
+                            messageType = newMsg.messageType ?: "text",
+                            status = newMsg.status ?: "sent",
+                            createdAt = newMsg.createdAt ?: System.currentTimeMillis(),
+                            replyTo = newMsg.replyTo,
+                            isDeleted = newMsg.isDeleted ?: false
+                        )
                         
-                        if (messages.none { it.messageId == newMsg.messageId || it.clientMessageId == newMsg.clientMessageId }) {
-                            messages.add(decryptedMsg)
-                            if (messages.isNotEmpty()) {
-                                listState.animateScrollToItem(messages.size - 1)
-                            }
+                        withContext(Dispatchers.IO) {
+                            messageDao.insertMessage(entity)
                         }
                     }
                 }
@@ -150,22 +190,26 @@ fun ChatRoomScreen(
             return
         }
 
-        val localMsg = Message(
+        // 1. Local Database me save karo (Pending status ke sath)
+        val localEntity = MessageEntity(
+            messageId = clientMsgId,
             clientMessageId = clientMsgId,
-            text = plainText, 
+            chatId = chatItem.id,
             senderCode = currentUserCode,
             receiverCode = chatItem.id,
-            mine = true,
+            encryptedText = encryptedText,
+            decryptedText = plainText, 
             status = "pending",
             createdAt = System.currentTimeMillis()
         )
-        messages.add(localMsg)
-        messageText = ""
         
-        scope.launch {
-            listState.animateScrollToItem(messages.size - 1)
+        scope.launch(Dispatchers.IO) {
+            messageDao.insertMessage(localEntity)
         }
+        
+        messageText = ""
 
+        // 2. Backend par bhejo
         val payload = SendMessagePayload(
             targetCode = chatItem.id, 
             text = encryptedText, 
@@ -177,16 +221,12 @@ fun ChatRoomScreen(
         )
 
         ChatWebSocketClient.sendMessage(payload) { response ->
-            if (response != null && response.has("success") && response.get("success").asBoolean) {
-                val index = messages.indexOfFirst { it.clientMessageId == clientMsgId }
-                if (index != -1) {
-                    messages[index] = messages[index].copy(status = "sent")
-                }
-            } else {
-                val index = messages.indexOfFirst { it.clientMessageId == clientMsgId }
-                if (index != -1) {
-                    messages[index] = messages[index].copy(status = "failed")
-                }
+            val isSuccess = response != null && response.has("success") && response.get("success").asBoolean
+            val newStatus = if (isSuccess) "sent" else "failed"
+            
+            // 3. Status update karo database me
+            scope.launch(Dispatchers.IO) {
+                messageDao.updateMessageStatus(clientMsgId, newStatus)
             }
         }
     }
@@ -203,6 +243,7 @@ fun ChatRoomScreen(
                 .background(BgColor)
                 .windowInsetsPadding(WindowInsets.safeDrawing)
         ) {
+            // --- Top Bar ---
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -234,6 +275,7 @@ fun ChatRoomScreen(
                 }
             }
 
+            // --- Messages List ---
             LazyColumn(
                 state = listState,
                 modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
@@ -256,6 +298,7 @@ fun ChatRoomScreen(
                 }
             }
 
+            // --- Input Area ---
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
