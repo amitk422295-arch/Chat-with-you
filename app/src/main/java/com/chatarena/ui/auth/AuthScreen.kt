@@ -26,8 +26,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.chatarena.network.OTPRequest
 import com.chatarena.network.RetrofitClient
+import com.chatarena.network.UpdateProfileRequest
 import com.chatarena.network.VerifyRequest
-import com.chatarena.utils.TokenManager // Naya Import
+import com.chatarena.utils.TokenManager
 import kotlinx.coroutines.launch
 
 // Colors
@@ -107,7 +108,7 @@ fun AuthScreen(onLoginSuccess: () -> Unit = {}) {
                     val user = body?.user
 
                     if (token != null && user != null) {
-                        // YAHAN TOKEN SAVE HO RAHA HAI
+                        // Token save karo
                         TokenManager.saveUserData(
                             context = context,
                             token = token,
@@ -116,7 +117,15 @@ fun AuthScreen(onLoginSuccess: () -> Unit = {}) {
                             fullName = user.fullName
                         )
 
-                        isProfileSetup = true // Agla step (Profile Setup)
+                        // CHECK KARO: Agar mobile number hai, toh purana user hai
+                        if (!user.mobile.isNullOrEmpty()) {
+                            toast("Welcome back!")
+                            onLoginSuccess()
+                        } else {
+                            // Naya user hai, profile setup dikhao
+                            setupName = if (user.fullName != user.userCode) user.fullName else ""
+                            isProfileSetup = true
+                        }
                     } else {
                         errorMessage = "Invalid response from server"
                     }
@@ -138,10 +147,40 @@ fun AuthScreen(onLoginSuccess: () -> Unit = {}) {
         if (cleanDigits.length != 10) { errorMessage = "Please enter a valid 10-digit mobile number"; return }
         
         isLoading = true; errorMessage = ""
-        isLoading = false
-        isProfileSetup = false
-        toast("Profile saved! (Local only for now)")
-        onLoginSuccess()
+        
+        scope.launch {
+            try {
+                val savedToken = TokenManager.getToken(context) ?: ""
+                val response = RetrofitClient.apiService.updateProfile(
+                    token = "Bearer $savedToken",
+                    request = UpdateProfileRequest(fullName = cleanName, mobile = cleanDigits)
+                )
+                
+                if (response.isSuccessful && response.body()?.success == true) {
+                    // Profile update ho gaya, ab local TokenManager me naya naam save karo
+                    val userCode = TokenManager.getUserCode(context) ?: ""
+                    val userEmail = TokenManager.getEmail(context) ?: ""
+                    
+                    TokenManager.saveUserData(
+                        context = context,
+                        token = savedToken,
+                        userCode = userCode,
+                        email = userEmail,
+                        fullName = cleanName
+                    )
+                    
+                    isProfileSetup = false
+                    toast("Profile saved successfully!")
+                    onLoginSuccess()
+                } else {
+                    errorMessage = response.body()?.error ?: "Failed to update profile"
+                }
+            } catch (e: Exception) {
+                errorMessage = "Network Error: ${e.message}"
+            } finally {
+                isLoading = false
+            }
+        }
     }
 
     Box(
