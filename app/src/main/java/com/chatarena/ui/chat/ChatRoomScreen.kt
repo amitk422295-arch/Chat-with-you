@@ -39,6 +39,7 @@ import com.chatarena.ui.camera.CameraScreen
 import com.chatarena.ui.chat.MessageBubble
 import com.chatarena.utils.CryptoManager
 import com.chatarena.utils.TokenManager
+import com.google.gson.Gson
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -59,14 +60,14 @@ fun ChatRoomScreen(
     var messageText by remember { mutableStateOf("") }
     var showCamera by remember { mutableStateOf(false) }
     
-    // 1. Database Initialize karo
+    // 1. Database Initialize
     val db = AppDatabase.getDatabase(context)
     val messageDao = db.messageDao()
 
-    // 2. Database se messages observe karo (Flow)
+    // 2. Observe messages from DB
     val messagesEntity by messageDao.getMessagesForChat(chatItem.id).collectAsState(initial = emptyList())
 
-    // 3. Entity ko UI Model (Message) me convert karo
+    // 3. Convert Entity to UI Model
     val messages = messagesEntity.map { entity ->
         Message(
             messageId = entity.messageId,
@@ -95,7 +96,7 @@ fun ChatRoomScreen(
         }
     }
 
-    fun fetchPublicKey() {
+    fun fetchPublicKey(onKeyFetched: () -> Unit) {
         isKeyLoading = true
         ChatWebSocketClient.getPublicKey(chatItem.id) { pubKey ->
             targetPublicKey = pubKey
@@ -105,23 +106,85 @@ fun ChatRoomScreen(
             if (pubKey != null) {
                 CryptoManager.savePublicKeyToDisk(context, chatItem.id, pubKey)
             }
+            onKeyFetched()
+        }
+    }
+
+    // NAYA: Function to fetch history from backend
+    fun fetchMessageHistory(pubKey: String?) {
+        ChatWebSocketClient.getMessages(chatItem.id) { response ->
+            if (response != null && response.has("success") && response.get("success").asBoolean) {
+                val messagesArray = response.getAsJsonArray("messages")
+                if (messagesArray != null) {
+                    val gson = Gson()
+                    scope.launch(Dispatchers.IO) {
+                        for (element in messagesArray) {
+                            try {
+                                val msgObj = element.asJsonObject
+                                val msg = gson.fromJson(msgObj, Message::class.java)
+                                
+                                // Decrypt text if it's a text message
+                                val decryptedText = if (msg.messageType == "text" && pubKey != null) {
+                                    CryptoManager.decryptText(context, msg.text, msg.senderCode ?: "", pubKey)
+                                } else {
+                                    msg.text
+                                }
+
+                                val entity = MessageEntity(
+                                    messageId = msg.messageId ?: msg.clientMessageId ?: UUID.randomUUID().toString(),
+                                    clientMessageId = msg.clientMessageId,
+                                    chatId = chatItem.id,
+                                    senderCode = msg.senderCode ?: "",
+                                    receiverCode = msg.receiverCode,
+                                    encryptedText = msg.text,
+                                    decryptedText = decryptedText,
+                                    messageType = msg.messageType ?: "text",
+                                    status = msg.status ?: "sent",
+                                    createdAt = msg.createdAt ?: System.currentTimeMillis(),
+                                    replyTo = msg.replyTo,
+                                    isDeleted = msg.isDeleted ?: false
+                                )
+                                
+                                // Insert into DB (OnConflict REPLACE handles duplicates)
+                                messageDao.insertMessage(entity)
+
+                                // Send ack if it's not mine
+                                if (msg.senderCode != currentUserCode && msg.messageId != null) {
+                                    ChatWebSocketClient.sendMessageReceived(msg.messageId, msg.senderCode)
+                                    ChatWebSocketClient.markMessageRead(msg.messageId, msg.senderCode)
+                                }
+                            } catch (e: Exception) {
+                                // Ignore individual message parsing errors
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
     LaunchedEffect(Unit) {
         ChatWebSocketClient.connect(currentUserCode, token)
         
-        // Disk se key load karo (WhatsApp Speed)
+        // Disk se key load karo
         val cachedKey = CryptoManager.getPublicKeyFromDisk(context, chatItem.id)
         
         if (cachedKey != null) {
             targetPublicKey = cachedKey
             isKeyLoaded = true
             isKeyLoading = false
+            // Key mil gayi, ab history fetch karo
+            fetchMessageHistory(cachedKey)
         } else {
-            fetchPublicKey()
+            fetchPublicKey {
+                // Key WebSocket se mil gayi, ab history fetch karo
+                if (targetPublicKey != null) {
+                    fetchMessageHistory(targetPublicKey)
+                }
+            }
         }
 
+        // Listen for new incoming messages
         ChatWebSocketClient.socketEvents.collect { response ->
             if (response.type == "new-message" && response.payload?.message != null) {
                 val newMsg = response.payload.message
@@ -136,7 +199,6 @@ fun ChatRoomScreen(
                             targetPubKeyBase64 = senderPubKey
                         )
                         
-                        // Naya message database me save karo
                         val entity = MessageEntity(
                             messageId = newMsg.messageId ?: newMsg.clientMessageId ?: UUID.randomUUID().toString(),
                             clientMessageId = newMsg.clientMessageId,
@@ -155,6 +217,12 @@ fun ChatRoomScreen(
                         withContext(Dispatchers.IO) {
                             messageDao.insertMessage(entity)
                         }
+                        
+                        // Ack back to server
+                        if (newMsg.messageId != null) {
+                             ChatWebSocketClient.sendMessageReceived(newMsg.messageId, newMsg.senderCode ?: "")
+                             ChatWebSocketClient.markMessageRead(newMsg.messageId, newMsg.senderCode ?: "")
+                        }
                     }
                 }
             }
@@ -171,7 +239,7 @@ fun ChatRoomScreen(
 
         if (!isKeyLoaded || targetPublicKey == null) {
             Toast.makeText(context, "Key not found. Retrying...", Toast.LENGTH_SHORT).show()
-            fetchPublicKey()
+            fetchPublicKey {}
             return
         }
 
@@ -190,7 +258,6 @@ fun ChatRoomScreen(
             return
         }
 
-        // 1. Local Database me save karo (Pending status ke sath)
         val localEntity = MessageEntity(
             messageId = clientMsgId,
             clientMessageId = clientMsgId,
@@ -209,7 +276,6 @@ fun ChatRoomScreen(
         
         messageText = ""
 
-        // 2. Backend par bhejo
         val payload = SendMessagePayload(
             targetCode = chatItem.id, 
             text = encryptedText, 
@@ -224,7 +290,6 @@ fun ChatRoomScreen(
             val isSuccess = response != null && response.has("success") && response.get("success").asBoolean
             val newStatus = if (isSuccess) "sent" else "failed"
             
-            // 3. Status update karo database me
             scope.launch(Dispatchers.IO) {
                 messageDao.updateMessageStatus(clientMsgId, newStatus)
             }
@@ -243,7 +308,6 @@ fun ChatRoomScreen(
                 .background(BgColor)
                 .windowInsetsPadding(WindowInsets.safeDrawing)
         ) {
-            // --- Top Bar ---
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -275,7 +339,6 @@ fun ChatRoomScreen(
                 }
             }
 
-            // --- Messages List ---
             LazyColumn(
                 state = listState,
                 modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
@@ -298,7 +361,6 @@ fun ChatRoomScreen(
                 }
             }
 
-            // --- Input Area ---
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
