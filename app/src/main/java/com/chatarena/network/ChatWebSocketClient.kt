@@ -2,6 +2,7 @@ package com.chatarena.network
 
 import android.util.Log
 import com.google.gson.Gson
+import com.google.gson.JsonNull
 import com.google.gson.JsonObject
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -77,12 +78,11 @@ object ChatWebSocketClient {
                     if (jsonObject.has("cbId")) {
                         val cbId = jsonObject.get("cbId").asInt
                         
-                        // FIX: Payload ko safely nikal rahe hain (Object ya String dono handle karne ke liye)
                         val payloadElement = jsonObject.get("payload")
                         val payload = if (payloadElement != null && payloadElement.isJsonObject) {
                             payloadElement.asJsonObject
                         } else {
-                            jsonObject // Fallback: Agar payload object nahi hai toh pura json bhej do
+                            jsonObject // Fallback
                         }
                         
                         finishCallback(cbId, payload)
@@ -141,7 +141,25 @@ object ChatWebSocketClient {
         }
     }
 
-    // FIXED FUNCTION: Ab ye JSON se publicKey ya public_key nikal kar dega
+    // ==========================================
+    // NAYA FUNCTION: Purane aur Offline Messages Fetch karne ke liye
+    // ==========================================
+    fun getMessages(targetCode: String, after: Long? = null, onResult: (JsonObject?) -> Unit) {
+        val cbId = cbIdCounter.getAndIncrement()
+        val payload = JsonObject().apply {
+            addProperty("targetCode", targetCode)
+            if (after != null) {
+                addProperty("after", after)
+            } else {
+                add("after", JsonNull.INSTANCE)
+            }
+        }
+        val event = mapOf("type" to "get-messages", "payload" to payload, "cbId" to cbId)
+
+        startCallbackTimeout(cbId, onResult)
+        webSocket?.send(gson.toJson(event))
+    }
+
     fun getPublicKey(targetCode: String, onResult: (String?) -> Unit) {
         val cbId = cbIdCounter.getAndIncrement()
         val payload = JsonObject().apply { addProperty("targetCode", targetCode) }
@@ -150,7 +168,6 @@ object ChatWebSocketClient {
         startCallbackTimeout(cbId) { json ->
             var pubKey: String? = null
             if (json != null) {
-                // Dono formats check kar rahe hain (camelCase aur snake_case)
                 if (json.has("publicKey") && !json.get("publicKey").isJsonNull) {
                     pubKey = json.get("publicKey").asString
                 } else if (json.has("public_key") && !json.get("public_key").isJsonNull) {
