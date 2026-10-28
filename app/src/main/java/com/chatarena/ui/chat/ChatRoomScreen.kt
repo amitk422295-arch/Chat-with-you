@@ -57,16 +57,26 @@ fun ChatRoomScreen(
     
     val messages = remember { mutableStateListOf<Message>() }
     
+    // States for Encryption Key
     var targetPublicKey by remember { mutableStateOf<String?>(null) }
     var isKeyLoaded by remember { mutableStateOf(false) }
+    var isKeyLoading by remember { mutableStateOf(true) } // NAYA: Loading state
+
+    // Function to fetch key (Retry ke liye alag nikal diya)
+    fun fetchPublicKey() {
+        isKeyLoading = true
+        ChatWebSocketClient.getPublicKey(chatItem.id) { pubKey ->
+            targetPublicKey = pubKey
+            isKeyLoaded = pubKey != null
+            isKeyLoading = false
+        }
+    }
 
     LaunchedEffect(Unit) {
         ChatWebSocketClient.connect(currentUserCode, token)
         
-        ChatWebSocketClient.getPublicKey(chatItem.id) { pubKey ->
-            targetPublicKey = pubKey
-            isKeyLoaded = pubKey != null
-        }
+        // Pehli baar key fetch karo
+        fetchPublicKey()
 
         ChatWebSocketClient.socketEvents.collect { response ->
             if (response.type == "new-message" && response.payload?.message != null) {
@@ -99,8 +109,16 @@ fun ChatRoomScreen(
     fun sendMessage() {
         if (messageText.isBlank()) return
         
+        // Agar key load ho rahi hai toh wait karo
+        if (isKeyLoading) {
+            Toast.makeText(context, "Fetching encryption keys, please wait...", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        // Agar key nahi mili, toh retry karo
         if (!isKeyLoaded || targetPublicKey == null) {
-            Toast.makeText(context, "User's encryption key not found. Ask them to open the app.", Toast.LENGTH_LONG).show()
+            Toast.makeText(context, "Key not found. Retrying...", Toast.LENGTH_SHORT).show()
+            fetchPublicKey()
             return
         }
 
@@ -256,15 +274,23 @@ fun ChatRoomScreen(
 
                 Spacer(modifier = Modifier.width(8.dp))
 
+                // NAYA: Button me loading spinner aur retry logic
                 IconButton(
                     onClick = { sendMessage() },
                     modifier = Modifier.background(
                         if (isKeyLoaded) PrimaryBlue else Color.Gray,
                         CircleShape
                     )
-                    // Yahan se enabled = isKeyLoaded hata diya gaya hai
                 ) {
-                    Icon(Icons.Default.Send, contentDescription = "Send", tint = Color.White)
+                    if (isKeyLoading) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            color = Color.White,
+                            strokeWidth = 2.dp
+                        )
+                    } else {
+                        Icon(Icons.Default.Send, contentDescription = "Send", tint = Color.White)
+                    }
                 }
             }
         }
