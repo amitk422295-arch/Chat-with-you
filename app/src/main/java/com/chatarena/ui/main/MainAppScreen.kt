@@ -34,14 +34,18 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import com.chatarena.ChatItem
+import com.chatarena.database.AppDatabase
+import com.chatarena.database.MessageEntity
 import com.chatarena.network.AIRequest
 import com.chatarena.network.RetrofitClient
 import com.chatarena.network.ChatWebSocketClient
 import com.chatarena.ui.auth.*
+import com.chatarena.utils.CryptoManager
 import com.chatarena.utils.TokenManager
-import com.google.gson.Gson
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.util.UUID
 import kotlin.random.Random
 
 @Composable
@@ -54,63 +58,87 @@ fun MainAppScreen(onLogout: () -> Unit) {
     var showSettingsModal by remember { mutableStateOf(false) }
     var showCreateGroup by remember { mutableStateOf(false) }
     
-    // Active Chat state
+    // Active Chat state (ChatRoomScreen ke liye)
     var activeChat by remember { mutableStateOf<ChatItem?>(null) }
     
-    // Live Chat List state
-    var chatList by remember { mutableStateOf<List<ChatItem>>(emptyList()) }
     val currentUserCode = TokenManager.getUserCode(context) ?: ""
 
-    // WebSocket events aur Purani chats (Inbox) load karne ke liye
+    // 1. LOCAL DATABASE SETUP (Single Source of Truth)
+    val db = remember { AppDatabase.getDatabase(context) }
+    val messageDao = remember { db.messageDao() }
+    val recentMessagesEntity by messageDao.getRecentChats().collectAsState(initial = emptyList())
+
+    // 2. SERVER METADATA (Names, Avatars, Unread counts ke liye cache)
+    val serverMetadata = remember { mutableStateMapOf<String, ChatItem>() }
+
+    // 3. FINAL LIST (Database aur Server dono ko mila kar UI banega)
+    val chatList = remember(recentMessagesEntity, serverMetadata.values.toList()) {
+        val finalChatList = mutableListOf<ChatItem>()
+        val dbChatIds = mutableSetOf<String>()
+
+        // Pehle Database se chats uthao (Sabse latest and reliable text yahan se aayega)
+        recentMessagesEntity.forEach { entity ->
+            dbChatIds.add(entity.chatId)
+            val metadata = serverMetadata[entity.chatId]
+            
+            var subtitle = entity.decryptedText
+            if (subtitle.startsWith("E2E:")) subtitle = "🔒 Message"
+
+            finalChatList.add(
+                ChatItem(
+                    type = "user",
+                    id = entity.chatId,
+                    name = metadata?.name ?: entity.chatId, // Naam server se nahi mila toh mobile/ID dikhayenge
+                    avatarUrl = metadata?.avatarUrl,
+                    subtitle = subtitle,
+                    unreadCount = metadata?.unreadCount ?: 0
+                )
+            )
+        }
+
+        // Fir wo chats add karo jo abhi tak DB me save nahi hue hain (Naye phone me login karne par)
+        serverMetadata.values.forEach { metadata ->
+            if (!dbChatIds.contains(metadata.id)) {
+                var subtitle = metadata.subtitle
+                if (subtitle.startsWith("E2E:")) subtitle = "🔒 Message"
+                finalChatList.add(metadata.copy(subtitle = subtitle))
+            }
+        }
+
+        finalChatList
+    }
+
     LaunchedEffect(Unit) {
         val token = TokenManager.getToken(context) ?: ""
         
-        // 1. Socket Connect karo
+        // Socket Connect karo
         ChatWebSocketClient.connect(currentUserCode, token)
 
-        // 2. App khulte hi purani chats fetch karo
+        // App khulte hi Server se metadata (Names, Unread counts) fetch karo
         ChatWebSocketClient.getRecentChats { response ->
             if (response != null && response.has("success") && response.get("success").asBoolean) {
                 val chatsArray = response.getAsJsonArray("chats")
-                if (chatsArray != null) {
-                    val loadedChats = mutableListOf<ChatItem>()
-                    chatsArray.forEach { element ->
-                        try {
-                            val chatObj = element.asJsonObject
-                            
-                            // JSON keys backend ke mutabiq adjust karein
-                            val id = chatObj.get("targetCode")?.asString ?: chatObj.get("userCode")?.asString ?: ""
-                            val name = chatObj.get("name")?.asString ?: "User"
-                            var subtitle = chatObj.get("lastMessage")?.asString ?: ""
-                            val unreadCount = chatObj.get("unreadCount")?.asInt ?: 0
-                            
-                            // Agar message encrypted (E2E) form mein aata hai toh UI par kachra na dikhe
-                            if (subtitle.startsWith("E2E:")) {
-                                subtitle = "🔒 Message"
-                            }
-
-                            if (id.isNotEmpty()) {
-                                loadedChats.add(
-                                    ChatItem(
-                                        type = "user",
-                                        id = id,
-                                        name = name,
-                                        avatarUrl = null,
-                                        subtitle = subtitle,
-                                        unreadCount = unreadCount
-                                    )
-                                )
-                            }
-                        } catch (e: Exception) {
-                            e.printStackTrace()
+                chatsArray?.forEach { element ->
+                    try {
+                        val chatObj = element.asJsonObject
+                        val id = chatObj.get("targetCode")?.asString ?: chatObj.get("userCode")?.asString ?: ""
+                        val name = chatObj.get("name")?.asString ?: id
+                        val subtitle = chatObj.get("lastMessage")?.asString ?: ""
+                        val unreadCount = chatObj.get("unreadCount")?.asInt ?: 0
+                        
+                        if (id.isNotEmpty()) {
+                            serverMetadata[id] = ChatItem(
+                                type = "user", id = id, name = name, subtitle = subtitle, unreadCount = unreadCount
+                            )
                         }
+                    } catch (e: Exception) {
+                        e.printStackTrace()
                     }
-                    chatList = loadedChats
                 }
             }
         }
 
-        // 3. Naye messages aane par list ko update (Top par lana)
+        // Naye messages aane par observe karna
         ChatWebSocketClient.socketEvents.collect { response ->
             val msg = response.payload?.message
             if (msg != null) {
@@ -118,29 +146,50 @@ fun MainAppScreen(onLogout: () -> Unit) {
                 val otherUserCode = if (isMine) msg.receiverCode ?: "" else msg.senderCode ?: ""
                 val otherUserName = if (isMine) "User" else (msg.senderName ?: otherUserCode)
                 
-                var latestText = msg.text
-                if (latestText.startsWith("E2E:")) {
-                    latestText = "🔒 Message"
-                }
-                
                 if (otherUserCode.isNotEmpty()) {
-                    chatList = chatList.toMutableList().apply {
-                        val existingIndex = indexOfFirst { it.id == otherUserCode }
-                        if (existingIndex != -1) {
-                            val existingItem = removeAt(existingIndex)
-                            // Agar samne wale ne bheja hai toh unread count badhao
-                            val newUnread = if (isMine) 0 else (existingItem.unreadCount + 1)
-                            add(0, existingItem.copy(subtitle = latestText, unreadCount = newUnread))
-                        } else {
-                            add(0, ChatItem(
-                                type = "user",
-                                id = otherUserCode,
-                                name = otherUserName,
-                                avatarUrl = null,
-                                subtitle = latestText,
-                                unreadCount = if (isMine) 0 else 1
-                            ))
+                    // 1. Metadata me Unread Count update karo (Sirf unke bheje msgs par)
+                    if (!isMine) {
+                        val existing = serverMetadata[otherUserCode]
+                        serverMetadata[otherUserCode] = ChatItem(
+                            type = "user",
+                            id = otherUserCode,
+                            name = existing?.name ?: otherUserName,
+                            avatarUrl = existing?.avatarUrl,
+                            subtitle = existing?.subtitle ?: "",
+                            unreadCount = (existing?.unreadCount ?: 0) + 1
+                        )
+                    }
+
+                    // 2. Database me Message Save Karo! 
+                    // (Jaise hi yahan save hoga, UI ka 'recentMessagesEntity' apne aap update ho jayega)
+                    val senderPubKey = CryptoManager.getPublicKeyFromDisk(context, msg.senderCode ?: "")
+                    var decryptedText = msg.text
+                    
+                    if (msg.messageType == "text" && senderPubKey != null && msg.text.startsWith("E2E:")) {
+                        try {
+                            decryptedText = CryptoManager.decryptText(context, msg.text, msg.senderCode ?: "", senderPubKey)
+                        } catch (e: Exception) {
+                            decryptedText = "🔒 Encrypted Message"
                         }
+                    }
+
+                    val entity = MessageEntity(
+                        messageId = msg.messageId ?: msg.clientMessageId ?: UUID.randomUUID().toString(),
+                        clientMessageId = msg.clientMessageId,
+                        chatId = otherUserCode,
+                        senderCode = msg.senderCode ?: "",
+                        receiverCode = msg.receiverCode,
+                        encryptedText = msg.text,
+                        decryptedText = decryptedText,
+                        messageType = msg.messageType ?: "text",
+                        status = msg.status ?: "sent",
+                        createdAt = msg.createdAt ?: System.currentTimeMillis(),
+                        replyTo = msg.replyTo,
+                        isDeleted = msg.isDeleted ?: false
+                    )
+
+                    scope.launch(Dispatchers.IO) {
+                        messageDao.insertMessage(entity)
                     }
                 }
             }
@@ -197,7 +246,7 @@ fun MainAppScreen(onLogout: () -> Unit) {
                     beyondBoundsPageCount = 1 
                 ) { page ->
                     when (page) {
-                        // UPDATE: Ab yahan Live 'chatList' pass ho rahi hai
+                        // UPDATE: Ab yahan Real-time combined 'chatList' pass ho rahi hai
                         0 -> ChatListScreen(
                             chatList = chatList,
                             onItemClick = { clickedChat -> activeChat = clickedChat }
