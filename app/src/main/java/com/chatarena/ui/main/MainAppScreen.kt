@@ -36,6 +36,7 @@ import androidx.compose.ui.window.Dialog
 import com.chatarena.ChatItem
 import com.chatarena.network.AIRequest
 import com.chatarena.network.RetrofitClient
+import com.chatarena.network.ChatWebSocketClient
 import com.chatarena.ui.auth.*
 import com.chatarena.utils.TokenManager
 import kotlinx.coroutines.delay
@@ -52,8 +53,47 @@ fun MainAppScreen(onLogout: () -> Unit) {
     var showSettingsModal by remember { mutableStateOf(false) }
     var showCreateGroup by remember { mutableStateOf(false) }
     
-    // NAYA: Active Chat state (Jab user kisi chat par click karega)
+    // Active Chat state
     var activeChat by remember { mutableStateOf<ChatItem?>(null) }
+    
+    // NAYA: Live Chat List state jisme hum WebSocket se data store karenge
+    var chatList by remember { mutableStateOf<List<ChatItem>>(emptyList()) }
+    val currentUserCode = TokenManager.getUserCode(context) ?: ""
+
+    // NAYA: WebSocket events ko sunne ke liye
+    LaunchedEffect(Unit) {
+        ChatWebSocketClient.socketEvents.collect { response ->
+            val msg = response.payload?.message
+            
+            if (msg != null) {
+                // Check if message is sent by me or received
+                val isMine = msg.senderCode == currentUserCode || msg.mine
+                val otherUserCode = if (isMine) msg.receiverCode ?: "" else msg.senderCode
+                val otherUserName = if (isMine) "User" else (msg.senderName ?: otherUserCode)
+                val latestText = msg.text
+                
+                // List ko update karna (Naya message top par)
+                chatList = chatList.toMutableList().apply {
+                    val existingIndex = indexOfFirst { it.id == otherUserCode }
+                    if (existingIndex != -1) {
+                        // Agar user pehle se hai, toh nikal kar update karo aur top pe daalo
+                        val existingItem = removeAt(existingIndex)
+                        add(0, existingItem.copy(subtitle = latestText))
+                    } else {
+                        // Agar naya chat hai, toh seedha top par add karo
+                        add(0, ChatItem(
+                            type = "user",
+                            id = otherUserCode,
+                            name = otherUserName,
+                            avatarUrl = null,
+                            subtitle = latestText,
+                            unreadCount = if (isMine) 0 else 1
+                        ))
+                    }
+                }
+            }
+        }
+    }
 
     Box(modifier = Modifier.fillMaxSize().background(BgColor)) {
         
@@ -105,9 +145,9 @@ fun MainAppScreen(onLogout: () -> Unit) {
                     beyondBoundsPageCount = 1 
                 ) { page ->
                     when (page) {
-                        // YAHAN CHANGE HUA HAI: onItemClick add kiya gaya hai
+                        // YAHAN CHANGE HUA HAI: emptyList() hatakar live chatList pass kiya hai
                         0 -> ChatListScreen(
-                            chatList = emptyList(),
+                            chatList = chatList,
                             onItemClick = { clickedChat -> activeChat = clickedChat }
                         )
                         1 -> ReelsWebView(url = "https://reel-center-2.onrender.com")
@@ -132,7 +172,7 @@ fun MainAppScreen(onLogout: () -> Unit) {
             }
         }
 
-        // NAYA: Chat Room Screen (Jab activeChat null nahi hai toh ye pura screen cover kar lega)
+        // Chat Room Screen
         if (activeChat != null) {
             ChatRoomScreen(
                 chatItem = activeChat!!,
@@ -333,7 +373,7 @@ fun AIModalScreen(onClose: () -> Unit) {
                 }
             }
 
-            // Input Area (Hamesha enabled rahega)
+            // Input Area
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
