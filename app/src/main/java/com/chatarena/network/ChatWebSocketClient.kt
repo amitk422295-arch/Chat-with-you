@@ -47,10 +47,6 @@ object ChatWebSocketClient {
         val timeoutJob: Job
     )
 
-    // ==========================================
-    // CONNECTION MANAGEMENT
-    // ==========================================
-
     fun connect(uCode: String, tkn: String) {
         this.userCode = uCode
         this.token = tkn
@@ -80,7 +76,15 @@ object ChatWebSocketClient {
 
                     if (jsonObject.has("cbId")) {
                         val cbId = jsonObject.get("cbId").asInt
-                        val payload = jsonObject.getAsJsonObject("payload")
+                        
+                        // FIX: Payload ko safely nikal rahe hain (Object ya String dono handle karne ke liye)
+                        val payloadElement = jsonObject.get("payload")
+                        val payload = if (payloadElement != null && payloadElement.isJsonObject) {
+                            payloadElement.asJsonObject
+                        } else {
+                            jsonObject // Fallback: Agar payload object nahi hai toh pura json bhej do
+                        }
+                        
                         finishCallback(cbId, payload)
                         return
                     }
@@ -127,10 +131,6 @@ object ChatWebSocketClient {
         callbacks.clear()
     }
 
-    // ==========================================
-    // CALLBACK MANAGEMENT
-    // ==========================================
-
     private fun finishCallback(cbId: Int, payload: JsonObject?) {
         val callbackData = callbacks.remove(cbId) ?: return
         callbackData.timeoutJob.cancel()
@@ -141,21 +141,21 @@ object ChatWebSocketClient {
         }
     }
 
-    // ==========================================
-    // EMIT FUNCTIONS
-    // ==========================================
-
-    // FIXED FUNCTION: Ab ye JSON se publicKey nikal kar dega
+    // FIXED FUNCTION: Ab ye JSON se publicKey ya public_key nikal kar dega
     fun getPublicKey(targetCode: String, onResult: (String?) -> Unit) {
         val cbId = cbIdCounter.getAndIncrement()
         val payload = JsonObject().apply { addProperty("targetCode", targetCode) }
         val event = mapOf("type" to "get-public-key", "payload" to payload, "cbId" to cbId)
         
         startCallbackTimeout(cbId) { json ->
-            val pubKey = if (json != null && json.has("publicKey")) {
-                json.get("publicKey").asString
-            } else {
-                null
+            var pubKey: String? = null
+            if (json != null) {
+                // Dono formats check kar rahe hain (camelCase aur snake_case)
+                if (json.has("publicKey") && !json.get("publicKey").isJsonNull) {
+                    pubKey = json.get("publicKey").asString
+                } else if (json.has("public_key") && !json.get("public_key").isJsonNull) {
+                    pubKey = json.get("public_key").asString
+                }
             }
             onResult(pubKey)
         }
@@ -189,10 +189,6 @@ object ChatWebSocketClient {
         val event = mapOf("type" to "message-received", "payload" to mapOf("messageId" to messageId, "senderCode" to senderCode))
         webSocket?.send(gson.toJson(event))
     }
-
-    // ==========================================
-    // CORE UTILITIES
-    // ==========================================
 
     private fun startCallbackTimeout(cbId: Int, onResult: (JsonObject?) -> Unit) {
         val timeoutJob = scope.launch {
