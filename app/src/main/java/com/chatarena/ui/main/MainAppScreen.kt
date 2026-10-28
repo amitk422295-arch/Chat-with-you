@@ -39,6 +39,7 @@ import com.chatarena.network.RetrofitClient
 import com.chatarena.network.ChatWebSocketClient
 import com.chatarena.ui.auth.*
 import com.chatarena.utils.TokenManager
+import com.google.gson.Gson
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.random.Random
@@ -56,39 +57,90 @@ fun MainAppScreen(onLogout: () -> Unit) {
     // Active Chat state
     var activeChat by remember { mutableStateOf<ChatItem?>(null) }
     
-    // NAYA: Live Chat List state jisme hum WebSocket se data store karenge
+    // Live Chat List state
     var chatList by remember { mutableStateOf<List<ChatItem>>(emptyList()) }
     val currentUserCode = TokenManager.getUserCode(context) ?: ""
 
-    // NAYA: WebSocket events ko sunne ke liye
+    // WebSocket events aur Purani chats (Inbox) load karne ke liye
     LaunchedEffect(Unit) {
+        val token = TokenManager.getToken(context) ?: ""
+        
+        // 1. Socket Connect karo
+        ChatWebSocketClient.connect(currentUserCode, token)
+
+        // 2. App khulte hi purani chats fetch karo
+        ChatWebSocketClient.getRecentChats { response ->
+            if (response != null && response.has("success") && response.get("success").asBoolean) {
+                val chatsArray = response.getAsJsonArray("chats")
+                if (chatsArray != null) {
+                    val loadedChats = mutableListOf<ChatItem>()
+                    chatsArray.forEach { element ->
+                        try {
+                            val chatObj = element.asJsonObject
+                            
+                            // JSON keys backend ke mutabiq adjust karein
+                            val id = chatObj.get("targetCode")?.asString ?: chatObj.get("userCode")?.asString ?: ""
+                            val name = chatObj.get("name")?.asString ?: "User"
+                            var subtitle = chatObj.get("lastMessage")?.asString ?: ""
+                            val unreadCount = chatObj.get("unreadCount")?.asInt ?: 0
+                            
+                            // Agar message encrypted (E2E) form mein aata hai toh UI par kachra na dikhe
+                            if (subtitle.startsWith("E2E:")) {
+                                subtitle = "🔒 Message"
+                            }
+
+                            if (id.isNotEmpty()) {
+                                loadedChats.add(
+                                    ChatItem(
+                                        type = "user",
+                                        id = id,
+                                        name = name,
+                                        avatarUrl = null,
+                                        subtitle = subtitle,
+                                        unreadCount = unreadCount
+                                    )
+                                )
+                            }
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                        }
+                    }
+                    chatList = loadedChats
+                }
+            }
+        }
+
+        // 3. Naye messages aane par list ko update (Top par lana)
         ChatWebSocketClient.socketEvents.collect { response ->
             val msg = response.payload?.message
-            
             if (msg != null) {
-                // Check if message is sent by me or received
                 val isMine = msg.senderCode == currentUserCode || msg.mine
-                val otherUserCode = if (isMine) msg.receiverCode ?: "" else msg.senderCode
+                val otherUserCode = if (isMine) msg.receiverCode ?: "" else msg.senderCode ?: ""
                 val otherUserName = if (isMine) "User" else (msg.senderName ?: otherUserCode)
-                val latestText = msg.text
                 
-                // List ko update karna (Naya message top par)
-                chatList = chatList.toMutableList().apply {
-                    val existingIndex = indexOfFirst { it.id == otherUserCode }
-                    if (existingIndex != -1) {
-                        // Agar user pehle se hai, toh nikal kar update karo aur top pe daalo
-                        val existingItem = removeAt(existingIndex)
-                        add(0, existingItem.copy(subtitle = latestText))
-                    } else {
-                        // Agar naya chat hai, toh seedha top par add karo
-                        add(0, ChatItem(
-                            type = "user",
-                            id = otherUserCode,
-                            name = otherUserName,
-                            avatarUrl = null,
-                            subtitle = latestText,
-                            unreadCount = if (isMine) 0 else 1
-                        ))
+                var latestText = msg.text
+                if (latestText.startsWith("E2E:")) {
+                    latestText = "🔒 Message"
+                }
+                
+                if (otherUserCode.isNotEmpty()) {
+                    chatList = chatList.toMutableList().apply {
+                        val existingIndex = indexOfFirst { it.id == otherUserCode }
+                        if (existingIndex != -1) {
+                            val existingItem = removeAt(existingIndex)
+                            // Agar samne wale ne bheja hai toh unread count badhao
+                            val newUnread = if (isMine) 0 else (existingItem.unreadCount + 1)
+                            add(0, existingItem.copy(subtitle = latestText, unreadCount = newUnread))
+                        } else {
+                            add(0, ChatItem(
+                                type = "user",
+                                id = otherUserCode,
+                                name = otherUserName,
+                                avatarUrl = null,
+                                subtitle = latestText,
+                                unreadCount = if (isMine) 0 else 1
+                            ))
+                        }
                     }
                 }
             }
@@ -145,7 +197,7 @@ fun MainAppScreen(onLogout: () -> Unit) {
                     beyondBoundsPageCount = 1 
                 ) { page ->
                     when (page) {
-                        // YAHAN CHANGE HUA HAI: emptyList() hatakar live chatList pass kiya hai
+                        // UPDATE: Ab yahan Live 'chatList' pass ho rahi hai
                         0 -> ChatListScreen(
                             chatList = chatList,
                             onItemClick = { clickedChat -> activeChat = clickedChat }
@@ -172,7 +224,7 @@ fun MainAppScreen(onLogout: () -> Unit) {
             }
         }
 
-        // Chat Room Screen
+        // Chat Room Screen (Jab kisi chat par click hoga)
         if (activeChat != null) {
             ChatRoomScreen(
                 chatItem = activeChat!!,
@@ -301,7 +353,6 @@ fun AIModalScreen(onClose: () -> Unit) {
                 .fillMaxSize()
                 .windowInsetsPadding(WindowInsets.safeDrawing) 
         ) {
-            // AI Top Bar (Header)
             Row(
                 modifier = Modifier.fillMaxWidth().background(CardColor).padding(16.dp),
                 verticalAlignment = Alignment.CenterVertically
@@ -322,17 +373,12 @@ fun AIModalScreen(onClose: () -> Unit) {
                 }
             }
 
-            // Chat Area
             LazyColumn(
                 state = listState,
                 modifier = Modifier
                     .weight(1f)
                     .padding(horizontal = 16.dp)
-                    .pointerInput(Unit) {
-                        detectTapGestures(onTap = {
-                            focusManager.clearFocus() 
-                        })
-                    },
+                    .pointerInput(Unit) { detectTapGestures(onTap = { focusManager.clearFocus() }) },
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 contentPadding = PaddingValues(vertical = 16.dp)
             ) {
@@ -356,15 +402,8 @@ fun AIModalScreen(onClose: () -> Unit) {
                 if (isAiThinking) {
                     item {
                         Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
-                            Surface(
-                                color = CardColor,
-                                shape = RoundedCornerShape(12.dp),
-                                shadowElevation = 2.dp
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
+                            Surface(color = CardColor, shape = RoundedCornerShape(12.dp), shadowElevation = 2.dp) {
+                                Row(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                                     TypingDotsAnimation()
                                 }
                             }
@@ -373,12 +412,8 @@ fun AIModalScreen(onClose: () -> Unit) {
                 }
             }
 
-            // Input Area
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(BgColor)
-                    .padding(16.dp),
+                modifier = Modifier.fillMaxWidth().background(BgColor).padding(16.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Surface(
@@ -402,9 +437,7 @@ fun AIModalScreen(onClose: () -> Unit) {
                     shape = CircleShape,
                     color = if (promptText.isNotBlank()) PrimaryBlue else SubTextColor.copy(alpha = 0.5f),
                     modifier = Modifier.size(48.dp).clickable(enabled = promptText.isNotBlank()) {
-                        if (!isAiThinking && !isTyping) {
-                            sendMessage()
-                        }
+                        if (!isAiThinking && !isTyping) sendMessage()
                     }
                 ) {
                     Box(contentAlignment = Alignment.Center) { Text("➤", color = Color.White) }
@@ -429,28 +462,17 @@ fun TypingDotsAnimation() {
 @Composable
 fun SettingsModal(email: String, onClose: () -> Unit, onLogout: () -> Unit) {
     Dialog(onDismissRequest = onClose) {
-        Surface(
-            shape = RoundedCornerShape(16.dp),
-            color = CardColor,
-            shadowElevation = 8.dp
-        ) {
+        Surface(shape = RoundedCornerShape(16.dp), color = CardColor, shadowElevation = 8.dp) {
             Column(modifier = Modifier.padding(24.dp)) {
                 Text("Settings", color = TextColor, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                 Spacer(modifier = Modifier.height(16.dp))
                 Text("Logged in as:\n$email", color = SubTextColor, fontSize = 14.sp)
                 Spacer(modifier = Modifier.height(24.dp))
-                Button(
-                    onClick = onLogout,
-                    colors = ButtonDefaults.buttonColors(containerColor = DangerRed),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
+                Button(onClick = onLogout, colors = ButtonDefaults.buttonColors(containerColor = DangerRed), modifier = Modifier.fillMaxWidth()) {
                     Text("🚪 Log Out", color = Color.White)
                 }
                 Spacer(modifier = Modifier.height(8.dp))
-                TextButton(
-                    onClick = onClose,
-                    modifier = Modifier.align(Alignment.End)
-                ) {
+                TextButton(onClick = onClose, modifier = Modifier.align(Alignment.End)) {
                     Text("Close", color = PrimaryBlue)
                 }
             }
@@ -461,20 +483,13 @@ fun SettingsModal(email: String, onClose: () -> Unit, onLogout: () -> Unit) {
 @Composable
 fun PlaceholderModal(title: String, onClose: () -> Unit) {
     Dialog(onDismissRequest = onClose) {
-        Surface(
-            shape = RoundedCornerShape(16.dp),
-            color = CardColor,
-            shadowElevation = 8.dp
-        ) {
+        Surface(shape = RoundedCornerShape(16.dp), color = CardColor, shadowElevation = 8.dp) {
             Column(modifier = Modifier.padding(24.dp)) {
                 Text(title, color = TextColor, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                 Spacer(modifier = Modifier.height(16.dp))
                 Text("This feature is under construction.", color = SubTextColor, fontSize = 14.sp)
                 Spacer(modifier = Modifier.height(24.dp))
-                TextButton(
-                    onClick = onClose,
-                    modifier = Modifier.align(Alignment.End)
-                ) {
+                TextButton(onClick = onClose, modifier = Modifier.align(Alignment.End)) {
                     Text("OK", color = PrimaryBlue)
                 }
             }
