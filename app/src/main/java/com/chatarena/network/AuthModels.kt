@@ -57,3 +57,17 @@ data class AIResponse(
     val reply: String? = null,
     val error: String? = null
 )
+
+// 6. Search User Response (Naya Add Kiya Gaya Hai)
+data class SearchUserResponse(
+    val success: Boolean,
+    val user: SearchUserData? = null,
+    val error: String? = null
+)
+
+data class SearchUserData(
+    val userCode: String,
+    val fullName: String,
+    val avatar: String? = null,
+    val publicKey: String? = null
+)
