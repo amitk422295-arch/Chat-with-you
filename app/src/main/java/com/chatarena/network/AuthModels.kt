@@ -39,3 +39,10 @@ data class UserData(
     @SerializedName("lastSeen") val lastSeen: Long? = null,
     @SerializedName("publicKey") val publicKey: String? = null
 )
+
+// 4. Update Profile Request (Naya User save karne ke liye)
+data class UpdateProfileRequest(
+    val fullName: String,
+    val mobile: String,
+    val publicKey: String = ""
+)
