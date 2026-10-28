@@ -1,5 +1,6 @@
 package com.chatarena.ui.main
 
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -54,33 +55,25 @@ fun ChatRoomScreen(
     var messageText by remember { mutableStateOf("") }
     var showCamera by remember { mutableStateOf(false) }
     
-    // Messages ki state
     val messages = remember { mutableStateListOf<Message>() }
     
-    // Target User ki Public Key (Encryption ke liye)
     var targetPublicKey by remember { mutableStateOf<String?>(null) }
     var isKeyLoaded by remember { mutableStateOf(false) }
 
-    // 1. Initial Setup (Key fetch karna aur Socket connect karna)
     LaunchedEffect(Unit) {
-        // Socket Connect
         ChatWebSocketClient.connect(currentUserCode, token)
         
-        // Target ki Public Key fetch karo
         ChatWebSocketClient.getPublicKey(chatItem.id) { pubKey ->
             targetPublicKey = pubKey
-            isKeyLoaded = true
+            isKeyLoaded = pubKey != null
         }
 
-        // Socket Events suno
         ChatWebSocketClient.socketEvents.collect { response ->
             if (response.type == "new-message" && response.payload?.message != null) {
                 val newMsg = response.payload.message
                 
-                // Check karo message isi chat ka hai
                 if (newMsg.senderCode == chatItem.id) {
-                    // Decrypt karo
-                    val senderPubKey = targetPublicKey // Assuming we have it
+                    val senderPubKey = targetPublicKey 
                     if (senderPubKey != null) {
                         val decryptedText = CryptoManager.decryptText(
                             context = context,
@@ -89,10 +82,8 @@ fun ChatRoomScreen(
                             targetPubKeyBase64 = senderPubKey
                         )
                         
-                        // Message ko UI list me add karo
                         val decryptedMsg = newMsg.copy(text = decryptedText, mine = false)
                         
-                        // Duplicate check
                         if (messages.none { it.messageId == newMsg.messageId || it.clientMessageId == newMsg.clientMessageId }) {
                             messages.add(decryptedMsg)
                             if (messages.isNotEmpty()) {
@@ -105,29 +96,32 @@ fun ChatRoomScreen(
         }
     }
 
-    // 2. Message Send Logic (With Encryption)
     fun sendMessage() {
-        if (messageText.isBlank() || !isKeyLoaded || targetPublicKey == null) return
+        if (messageText.isBlank()) return
         
+        if (!isKeyLoaded || targetPublicKey == null) {
+            Toast.makeText(context, "User's encryption key not found. Ask them to open the app.", Toast.LENGTH_LONG).show()
+            return
+        }
+
         val clientMsgId = UUID.randomUUID().toString()
         val plainText = messageText.trim()
 
-        // 1. Encrypt karo
         val encryptedText = try {
             CryptoManager.encryptText(
                 context = context,
                 text = plainText,
-                targetCode = chatItem.id,
+                targetCode = chatItem.id, 
                 targetPubKeyBase64 = targetPublicKey!!
             )
         } catch (e: Exception) {
+            Toast.makeText(context, "Encryption Failed!", Toast.LENGTH_SHORT).show()
             return
         }
 
-        // 2. Local Message create karo (Optimistic UI)
         val localMsg = Message(
             clientMessageId = clientMsgId,
-            text = plainText, // UI me plain text dikhao
+            text = plainText, 
             senderCode = currentUserCode,
             receiverCode = chatItem.id,
             mine = true,
@@ -141,23 +135,23 @@ fun ChatRoomScreen(
             listState.animateScrollToItem(messages.size - 1)
         }
 
-        // 3. Backend par bhejo
         val payload = SendMessagePayload(
-            receiverCode = chatItem.id,
-            text = encryptedText, // Backend par encrypted text jayega
+            targetCode = chatItem.id, 
+            text = encryptedText, 
             clientMessageId = clientMsgId,
-            messageType = "text"
+            messageType = "text",
+            senderName = TokenManager.getFullName(context),
+            senderAvatar = "",
+            senderMobile = TokenManager.getEmail(context)
         )
 
         ChatWebSocketClient.sendMessage(payload) { response ->
             if (response != null && response.has("success") && response.get("success").asBoolean) {
-                // Message sent successful -> Update status to 'sent'
                 val index = messages.indexOfFirst { it.clientMessageId == clientMsgId }
                 if (index != -1) {
                     messages[index] = messages[index].copy(status = "sent")
                 }
             } else {
-                // Failed -> Update status to 'failed'
                 val index = messages.indexOfFirst { it.clientMessageId == clientMsgId }
                 if (index != -1) {
                     messages[index] = messages[index].copy(status = "failed")
@@ -166,13 +160,9 @@ fun ChatRoomScreen(
         }
     }
 
-    // Camera Screen Overlay
     if (showCamera) {
         CameraScreen(
-            onPhotoCaptured = { uri ->
-                showCamera = false
-                // TODO: Media upload logic
-            },
+            onPhotoCaptured = { uri -> showCamera = false },
             onClose = { showCamera = false }
         )
     } else {
@@ -182,7 +172,6 @@ fun ChatRoomScreen(
                 .background(BgColor)
                 .windowInsetsPadding(WindowInsets.safeDrawing)
         ) {
-            // --- Top Bar ---
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -214,7 +203,6 @@ fun ChatRoomScreen(
                 }
             }
 
-            // --- Messages List ---
             LazyColumn(
                 state = listState,
                 modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
@@ -225,7 +213,7 @@ fun ChatRoomScreen(
                     MessageBubble(
                         message = msg,
                         isMine = msg.mine,
-                        showSender = false, // 1-on-1 chat me sender name nahi dikhta
+                        showSender = false,
                         isSelected = false,
                         isSelectionMode = false,
                         onLongPress = {},
@@ -237,7 +225,6 @@ fun ChatRoomScreen(
                 }
             }
 
-            // --- Input Area ---
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
