@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.sp
 import com.chatarena.network.OTPRequest
 import com.chatarena.network.RetrofitClient
 import com.chatarena.network.VerifyRequest
+import com.chatarena.utils.TokenManager // Naya Import
 import kotlinx.coroutines.launch
 
 // Colors
@@ -49,7 +50,6 @@ fun AuthScreen(onLoginSuccess: () -> Unit = {}) {
     var isLoading by remember { mutableStateOf(false) }
     var buttonText by remember { mutableStateOf("Send OTP") }
 
-    // NAYA VARIABLE: Error dikhane ke liye
     var errorMessage by remember { mutableStateOf("") }
 
     var isProfileSetup by remember { mutableStateOf(false) }
@@ -76,12 +76,10 @@ fun AuthScreen(onLoginSuccess: () -> Unit = {}) {
                     toast(response.body()?.message ?: "Access Code sent to your email!")
                 } else {
                     buttonText = "Send OTP"
-                    // API Error Screen par dikhao
                     errorMessage = response.body()?.error ?: "Failed. HTTP Code: ${response.code()}"
                 }
             } catch (e: Exception) {
                 buttonText = "Send OTP"
-                // Network Error Screen par dikhao
                 errorMessage = "Network Error: ${e.message}"
             } finally {
                 isLoading = false
@@ -104,7 +102,24 @@ fun AuthScreen(onLoginSuccess: () -> Unit = {}) {
                 )
                 
                 if (response.isSuccessful && response.body()?.success == true) {
-                    isProfileSetup = true
+                    val body = response.body()
+                    val token = body?.chatToken
+                    val user = body?.user
+
+                    if (token != null && user != null) {
+                        // YAHAN TOKEN SAVE HO RAHA HAI
+                        TokenManager.saveUserData(
+                            context = context,
+                            token = token,
+                            userCode = user.userCode,
+                            email = user.email,
+                            fullName = user.fullName
+                        )
+
+                        isProfileSetup = true // Agla step (Profile Setup)
+                    } else {
+                        errorMessage = "Invalid response from server"
+                    }
                 } else {
                     errorMessage = response.body()?.error ?: "Incorrect OTP"
                 }
@@ -149,7 +164,6 @@ fun AuthScreen(onLoginSuccess: () -> Unit = {}) {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            // NAYA UI: Agar error hai toh laal rang me screen par dikhao
             if (errorMessage.isNotEmpty()) {
                 Text(
                     text = errorMessage,
