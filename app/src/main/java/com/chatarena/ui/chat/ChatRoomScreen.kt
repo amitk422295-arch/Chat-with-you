@@ -60,23 +60,38 @@ fun ChatRoomScreen(
     // States for Encryption Key
     var targetPublicKey by remember { mutableStateOf<String?>(null) }
     var isKeyLoaded by remember { mutableStateOf(false) }
-    var isKeyLoading by remember { mutableStateOf(true) } // NAYA: Loading state
+    var isKeyLoading by remember { mutableStateOf(true) }
 
-    // Function to fetch key (Retry ke liye alag nikal diya)
+    // Function to fetch key from WebSocket (agar disk me na mile)
     fun fetchPublicKey() {
         isKeyLoading = true
         ChatWebSocketClient.getPublicKey(chatItem.id) { pubKey ->
             targetPublicKey = pubKey
             isKeyLoaded = pubKey != null
             isKeyLoading = false
+            
+            // NAYA: Jab key mil jaye, toh disk me save kar do
+            if (pubKey != null) {
+                CryptoManager.savePublicKeyToDisk(context, chatItem.id, pubKey)
+            }
         }
     }
 
     LaunchedEffect(Unit) {
         ChatWebSocketClient.connect(currentUserCode, token)
         
-        // Pehli baar key fetch karo
-        fetchPublicKey()
+        // NAYA: Pehle Disk (Local Memory) se key check karo
+        val cachedKey = CryptoManager.getPublicKeyFromDisk(context, chatItem.id)
+        
+        if (cachedKey != null) {
+            // Agar disk me mil gayi, toh instantly load karo (WhatsApp Speed)
+            targetPublicKey = cachedKey
+            isKeyLoaded = true
+            isKeyLoading = false
+        } else {
+            // Agar nahi mili, toh WebSocket se fetch karo
+            fetchPublicKey()
+        }
 
         ChatWebSocketClient.socketEvents.collect { response ->
             if (response.type == "new-message" && response.payload?.message != null) {
@@ -109,13 +124,11 @@ fun ChatRoomScreen(
     fun sendMessage() {
         if (messageText.isBlank()) return
         
-        // Agar key load ho rahi hai toh wait karo
         if (isKeyLoading) {
             Toast.makeText(context, "Fetching encryption keys, please wait...", Toast.LENGTH_SHORT).show()
             return
         }
 
-        // Agar key nahi mili, toh retry karo
         if (!isKeyLoaded || targetPublicKey == null) {
             Toast.makeText(context, "Key not found. Retrying...", Toast.LENGTH_SHORT).show()
             fetchPublicKey()
@@ -274,7 +287,6 @@ fun ChatRoomScreen(
 
                 Spacer(modifier = Modifier.width(8.dp))
 
-                // NAYA: Button me loading spinner aur retry logic
                 IconButton(
                     onClick = { sendMessage() },
                     modifier = Modifier.background(
