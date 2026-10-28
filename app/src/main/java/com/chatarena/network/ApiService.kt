@@ -2,6 +2,7 @@ package com.chatarena.network
 
 import retrofit2.Response
 import retrofit2.http.Body
+import retrofit2.http.Header
 import retrofit2.http.POST
 
 interface ApiService {
@@ -14,4 +15,10 @@ interface ApiService {
     @POST("api/auth/verify-otp")
     suspend fun verifyOtp(@Body request: VerifyRequest): Response<VerifyResponse>
 
+    // 3. Naya User Profile Update karne ke liye (Naya add kiya gaya hai)
+    @POST("api/auth/update-profile")
+    suspend fun updateProfile(
+        @Header("Authorization") token: String,
+        @Body request: UpdateProfileRequest
+    ): Response<VerifyResponse>
 }
