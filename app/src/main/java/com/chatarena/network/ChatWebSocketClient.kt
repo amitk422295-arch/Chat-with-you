@@ -31,7 +31,6 @@ object ChatWebSocketClient {
     private val _connectionState = MutableStateFlow(false)
     val connectionState: StateFlow<Boolean> = _connectionState
 
-    // Sabhi incoming events (new-message, typing, etc.) ke liye Flow
     private val _socketEvents = MutableSharedFlow<SocketResponse>(extraBufferCapacity = 100)
     val socketEvents: SharedFlow<SocketResponse> = _socketEvents
 
@@ -40,7 +39,6 @@ object ChatWebSocketClient {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var isIntentionalDisconnect = false
 
-    // Callback Management (JS ke cbId jaisa)
     private val cbIdCounter = AtomicInteger(1)
     private val callbacks = ConcurrentHashMap<Int, CallbackData>()
 
@@ -80,7 +78,6 @@ object ChatWebSocketClient {
                     
                     if (type == "ping" || type == "pong") return
 
-                    // 1. Callback Response Check
                     if (jsonObject.has("cbId")) {
                         val cbId = jsonObject.get("cbId").asInt
                         val payload = jsonObject.getAsJsonObject("payload")
@@ -88,13 +85,11 @@ object ChatWebSocketClient {
                         return
                     }
 
-                    // 2. Message Sent Callback (Special Case from chatStore.js)
                     if (type == "message-sent-callback") {
                         _socketEvents.tryEmit(SocketResponse(type, gson.fromJson(jsonObject.get("payload"), SocketPayload::class.java)))
                         return
                     }
 
-                    // 3. Normal Events (new-message, typing, status, etc.)
                     val payload = jsonObject.getAsJsonObject("payload")
                     val socketPayload = gson.fromJson(payload, SocketPayload::class.java)
                     _socketEvents.tryEmit(SocketResponse(type, socketPayload))
@@ -128,13 +123,12 @@ object ChatWebSocketClient {
         webSocket = null
         _connectionState.value = false
         
-        // Clear all pending callbacks
         callbacks.forEach { (_, data) -> data.timeoutJob.cancel() }
         callbacks.clear()
     }
 
     // ==========================================
-    // CALLBACK MANAGEMENT (JS ka cbId logic)
+    // CALLBACK MANAGEMENT
     // ==========================================
 
     private fun finishCallback(cbId: Int, payload: JsonObject?) {
@@ -148,20 +142,26 @@ object ChatWebSocketClient {
     }
 
     // ==========================================
-    // EMIT FUNCTIONS (Naye Events)
+    // EMIT FUNCTIONS
     // ==========================================
 
-    // 1. Get Target User's Public Key (Encryption ke liye)
+    // FIXED FUNCTION: Ab ye JSON se publicKey nikal kar dega
     fun getPublicKey(targetCode: String, onResult: (String?) -> Unit) {
         val cbId = cbIdCounter.getAndIncrement()
         val payload = JsonObject().apply { addProperty("targetCode", targetCode) }
         val event = mapOf("type" to "get-public-key", "payload" to payload, "cbId" to cbId)
         
-        startCallbackTimeout(cbId) { onResult(null) }
+        startCallbackTimeout(cbId) { json ->
+            val pubKey = if (json != null && json.has("publicKey")) {
+                json.get("publicKey").asString
+            } else {
+                null
+            }
+            onResult(pubKey)
+        }
         webSocket?.send(gson.toJson(event))
     }
 
-    // 2. Send Encrypted Message
     fun sendMessage(payload: SendMessagePayload, onResult: (JsonObject?) -> Unit) {
         val cbId = cbIdCounter.getAndIncrement()
         val event = mapOf("type" to "send-message", "payload" to payload, "cbId" to cbId)
@@ -170,7 +170,6 @@ object ChatWebSocketClient {
         webSocket?.send(gson.toJson(event))
     }
 
-    // 3. Send Typing Status
     fun sendTyping(targetCode: String) {
         val event = mapOf("type" to "typing", "payload" to mapOf("targetCode" to targetCode))
         webSocket?.send(gson.toJson(event))
@@ -181,7 +180,6 @@ object ChatWebSocketClient {
         webSocket?.send(gson.toJson(event))
     }
 
-    // 4. Mark Message as Read (Blue Ticks)
     fun markMessageRead(messageId: String, senderCode: String) {
         val event = mapOf("type" to "mark-message-read", "payload" to mapOf("messageId" to messageId, "senderCode" to senderCode))
         webSocket?.send(gson.toJson(event))
