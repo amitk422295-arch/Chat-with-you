@@ -33,6 +33,8 @@ import com.chatarena.ui.auth.PrimaryBlue
 import com.chatarena.ui.auth.SubTextColor
 import com.chatarena.ui.auth.TextColor
 import com.chatarena.ui.camera.CameraScreen
+import com.chatarena.ui.chat.MessageBubble
+import com.chatarena.utils.CryptoManager
 import com.chatarena.utils.TokenManager
 import kotlinx.coroutines.launch
 import java.util.UUID
@@ -54,51 +56,113 @@ fun ChatRoomScreen(
     
     // Messages ki state
     val messages = remember { mutableStateListOf<Message>() }
+    
+    // Target User ki Public Key (Encryption ke liye)
+    var targetPublicKey by remember { mutableStateOf<String?>(null) }
+    var isKeyLoaded by remember { mutableStateOf(false) }
 
-    // 1. WebSocket Connect & Listen
+    // 1. Initial Setup (Key fetch karna aur Socket connect karna)
     LaunchedEffect(Unit) {
+        // Socket Connect
         ChatWebSocketClient.connect(currentUserCode, token)
+        
+        // Target ki Public Key fetch karo
+        ChatWebSocketClient.getPublicKey(chatItem.id) { pubKey ->
+            targetPublicKey = pubKey
+            isKeyLoaded = true
+        }
 
+        // Socket Events suno
         ChatWebSocketClient.socketEvents.collect { response ->
-            if (response.type == "receive-message" && response.payload?.message != null) {
+            if (response.type == "new-message" && response.payload?.message != null) {
                 val newMsg = response.payload.message
-                if (newMsg.senderCode == chatItem.id || newMsg.senderCode == currentUserCode) {
-                    messages.add(newMsg)
-                    if (messages.isNotEmpty()) {
-                        listState.animateScrollToItem(messages.size - 1)
+                
+                // Check karo message isi chat ka hai
+                if (newMsg.senderCode == chatItem.id) {
+                    // Decrypt karo
+                    val senderPubKey = targetPublicKey // Assuming we have it
+                    if (senderPubKey != null) {
+                        val decryptedText = CryptoManager.decryptText(
+                            context = context,
+                            cipherText = newMsg.text,
+                            targetCode = newMsg.senderCode,
+                            targetPubKeyBase64 = senderPubKey
+                        )
+                        
+                        // Message ko UI list me add karo
+                        val decryptedMsg = newMsg.copy(text = decryptedText, mine = false)
+                        
+                        // Duplicate check
+                        if (messages.none { it.messageId == newMsg.messageId || it.clientMessageId == newMsg.clientMessageId }) {
+                            messages.add(decryptedMsg)
+                            if (messages.isNotEmpty()) {
+                                listState.animateScrollToItem(messages.size - 1)
+                            }
+                        }
                     }
                 }
             }
         }
     }
 
-    // 2. Message Send Logic
+    // 2. Message Send Logic (With Encryption)
     fun sendMessage() {
-        if (messageText.isBlank()) return
+        if (messageText.isBlank() || !isKeyLoaded || targetPublicKey == null) return
         
         val clientMsgId = UUID.randomUUID().toString()
-        val payload = SendMessagePayload(
-            receiverCode = chatItem.id,
-            text = messageText.trim(),
-            clientMessageId = clientMsgId
-        )
+        val plainText = messageText.trim()
 
+        // 1. Encrypt karo
+        val encryptedText = try {
+            CryptoManager.encryptText(
+                context = context,
+                text = plainText,
+                targetCode = chatItem.id,
+                targetPubKeyBase64 = targetPublicKey!!
+            )
+        } catch (e: Exception) {
+            return
+        }
+
+        // 2. Local Message create karo (Optimistic UI)
         val localMsg = Message(
             clientMessageId = clientMsgId,
-            text = messageText.trim(),
+            text = plainText, // UI me plain text dikhao
             senderCode = currentUserCode,
+            receiverCode = chatItem.id,
             mine = true,
             status = "pending",
             createdAt = System.currentTimeMillis()
         )
         messages.add(localMsg)
-        
-        ChatWebSocketClient.sendMessage(payload)
-        
         messageText = ""
         
         scope.launch {
             listState.animateScrollToItem(messages.size - 1)
+        }
+
+        // 3. Backend par bhejo
+        val payload = SendMessagePayload(
+            receiverCode = chatItem.id,
+            text = encryptedText, // Backend par encrypted text jayega
+            clientMessageId = clientMsgId,
+            messageType = "text"
+        )
+
+        ChatWebSocketClient.sendMessage(payload) { response ->
+            if (response != null && response.has("success") && response.get("success").asBoolean) {
+                // Message sent successful -> Update status to 'sent'
+                val index = messages.indexOfFirst { it.clientMessageId == clientMsgId }
+                if (index != -1) {
+                    messages[index] = messages[index].copy(status = "sent")
+                }
+            } else {
+                // Failed -> Update status to 'failed'
+                val index = messages.indexOfFirst { it.clientMessageId == clientMsgId }
+                if (index != -1) {
+                    messages[index] = messages[index].copy(status = "failed")
+                }
+            }
         }
     }
 
@@ -107,6 +171,7 @@ fun ChatRoomScreen(
         CameraScreen(
             onPhotoCaptured = { uri ->
                 showCamera = false
+                // TODO: Media upload logic
             },
             onClose = { showCamera = false }
         )
@@ -157,7 +222,18 @@ fun ChatRoomScreen(
                 contentPadding = PaddingValues(vertical = 16.dp)
             ) {
                 items(messages) { msg ->
-                    MessageBubbleItem(msg)
+                    MessageBubble(
+                        message = msg,
+                        isMine = msg.mine,
+                        showSender = false, // 1-on-1 chat me sender name nahi dikhta
+                        isSelected = false,
+                        isSelectionMode = false,
+                        onLongPress = {},
+                        onReplySwipe = {},
+                        onToggleSelection = {},
+                        onJumpToReply = {},
+                        onMediaTap = {}
+                    )
                 }
             }
 
@@ -195,38 +271,14 @@ fun ChatRoomScreen(
 
                 IconButton(
                     onClick = { sendMessage() },
-                    modifier = Modifier.background(PrimaryBlue, CircleShape)
+                    modifier = Modifier.background(
+                        if (isKeyLoaded) PrimaryBlue else Color.Gray,
+                        CircleShape
+                    ),
+                    enabled = isKeyLoaded
                 ) {
                     Icon(Icons.Default.Send, contentDescription = "Send", tint = Color.White)
                 }
-            }
-        }
-    }
-}
-
-@Composable
-fun MessageBubbleItem(msg: Message) {
-    Box(
-        modifier = Modifier.fillMaxWidth(),
-        contentAlignment = if (msg.mine) Alignment.CenterEnd else Alignment.CenterStart
-    ) {
-        Surface(
-            color = if (msg.mine) PrimaryBlue else CardColor,
-            shape = RoundedCornerShape(
-                topStart = 16.dp,
-                topEnd = 16.dp,
-                bottomStart = if (msg.mine) 16.dp else 4.dp,
-                bottomEnd = if (msg.mine) 4.dp else 16.dp
-            ),
-            shadowElevation = 2.dp,
-            modifier = Modifier.widthIn(max = 280.dp)
-        ) {
-            Column(modifier = Modifier.padding(10.dp)) {
-                Text(
-                    text = msg.text,
-                    color = if (msg.mine) Color.White else TextColor,
-                    fontSize = 15.sp
-                )
             }
         }
     }
