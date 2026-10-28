@@ -35,13 +35,16 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import com.chatarena.ChatItem
+import com.chatarena.network.AIRequest
+import com.chatarena.network.RetrofitClient
 import com.chatarena.ui.auth.*
-import com.chatarena.utils.TokenManager // Naya Import
+import com.chatarena.utils.TokenManager
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.random.Random
 
 @Composable
-fun MainAppScreen(onLogout: () -> Unit) { // Yahan onLogout add kiya gaya hai
+fun MainAppScreen(onLogout: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val pagerState = rememberPagerState(initialPage = 0, pageCount = { 3 })
@@ -52,7 +55,6 @@ fun MainAppScreen(onLogout: () -> Unit) { // Yahan onLogout add kiya gaya hai
 
     Box(modifier = Modifier.fillMaxSize().background(BgColor)) {
         
-        // Asli App UI (Agar AI open nahi hai tabhi ye dikhega)
         if (!showAIModal) {
             Column(modifier = Modifier.fillMaxSize().systemBarsPadding()) { 
                 // Top Navbar
@@ -73,7 +75,6 @@ fun MainAppScreen(onLogout: () -> Unit) { // Yahan onLogout add kiya gaya hai
                         }
                     }
                     
-                    // Tabs
                     TabRow(
                         selectedTabIndex = pagerState.currentPage,
                         containerColor = CardColor,
@@ -95,7 +96,6 @@ fun MainAppScreen(onLogout: () -> Unit) { // Yahan onLogout add kiya gaya hai
                     }
                 }
 
-                // Panes Content
                 HorizontalPager(
                     state = pagerState, 
                     modifier = Modifier.weight(1f),
@@ -109,7 +109,6 @@ fun MainAppScreen(onLogout: () -> Unit) { // Yahan onLogout add kiya gaya hai
                 }
             }
 
-            // AI FAB
             if (pagerState.currentPage != 1) {
                 Box(modifier = Modifier.align(Alignment.BottomEnd).padding(24.dp).navigationBarsPadding()) {
                     Surface(
@@ -126,24 +125,21 @@ fun MainAppScreen(onLogout: () -> Unit) { // Yahan onLogout add kiya gaya hai
             }
         }
 
-        // AI Chat Screen
         if (showAIModal) {
             AIModalScreen(onClose = { showAIModal = false })
         }
 
-        // Settings Modal
         if (showSettingsModal) {
             SettingsModal(
-                email = TokenManager.getEmail(context) ?: "user@example.com", // Real email fetch ho rahi hai
+                email = TokenManager.getEmail(context) ?: "user@example.com",
                 onClose = { showSettingsModal = false },
                 onLogout = { 
                     showSettingsModal = false
-                    onLogout() // Token delete karke Login screen par bhej dega
+                    onLogout()
                 }
             )
         }
 
-        // Create Group Modal
         if (showCreateGroup) {
             PlaceholderModal(title = "Create Group", onClose = { showCreateGroup = false })
         }
@@ -179,16 +175,71 @@ data class AIMessage(val id: String, val text: String, val isUser: Boolean)
 
 @Composable
 fun AIModalScreen(onClose: () -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var promptText by remember { mutableStateOf("") }
     val messages = remember { mutableStateListOf(AIMessage("0", "Hi there! I am ChatArena AI. How can I help you today?", false)) }
     val focusManager = LocalFocusManager.current
     
-    // Auto-scroll ka logic
+    // AI ki states
+    var isAiThinking by remember { mutableStateOf(false) }
+    var isTyping by remember { mutableStateOf(false) }
+
     val listState = rememberLazyListState()
 
-    LaunchedEffect(messages.size) {
+    // Auto-scroll logic (Jab naya message aaye ya type ho)
+    LaunchedEffect(messages.size, messages.lastOrNull()?.text?.length) {
         if (messages.isNotEmpty()) {
             listState.animateScrollToItem(messages.size - 1)
+        }
+    }
+
+    fun sendMessage() {
+        val text = promptText.trim()
+        if (text.isEmpty() || isAiThinking || isTyping) return
+
+        // 1. User ka message add karo
+        messages.add(AIMessage(Random.nextInt().toString(), text, true))
+        promptText = ""
+        isAiThinking = true
+
+        val token = TokenManager.getToken(context) ?: ""
+
+        scope.launch {
+            try {
+                // 2. API Call
+                val response = RetrofitClient.apiService.aiChat(
+                    token = "Bearer $token",
+                    request = AIRequest(message = text)
+                )
+
+                isAiThinking = false
+
+                if (response.isSuccessful && response.body()?.success == true) {
+                    val reply = response.body()?.reply ?: "No response from AI."
+                    
+                    // 3. AI ka khaali message add karo (Typewriter effect ke liye)
+                    val newMsgId = Random.nextInt().toString()
+                    messages.add(AIMessage(newMsgId, "", false))
+                    
+                    isTyping = true
+                    // 4. Typewriter Effect (Ek-ek character karke likhna)
+                    for (char in reply) {
+                        val currentMsg = messages.find { it.id == newMsgId }
+                        if (currentMsg != null) {
+                            val index = messages.indexOf(currentMsg)
+                            messages[index] = currentMsg.copy(text = currentMsg.text + char)
+                        }
+                        delay(15L) // Speed control (15 milliseconds per character)
+                    }
+                    isTyping = false
+                } else {
+                    messages.add(AIMessage(Random.nextInt().toString(), "Error: ${response.body()?.error ?: "Unknown error"}", false))
+                }
+            } catch (e: Exception) {
+                isAiThinking = false
+                messages.add(AIMessage(Random.nextInt().toString(), "Network Error: ${e.message}", false))
+            }
         }
     }
 
@@ -218,7 +269,7 @@ fun AIModalScreen(onClose: () -> Unit) {
                 Spacer(modifier = Modifier.width(12.dp))
                 Column {
                     Text("ChatArena AI", color = PrimaryBlue, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                    Text("Smart Assistant", color = SubTextColor, fontSize = 12.sp)
+                    Text(if (isAiThinking) "Thinking..." else "Smart Assistant", color = SubTextColor, fontSize = 12.sp)
                 }
             }
 
@@ -252,6 +303,26 @@ fun AIModalScreen(onClose: () -> Unit) {
                         }
                     }
                 }
+
+                // AI Thinking Indicator (3 Dots animation)
+                if (isAiThinking) {
+                    item {
+                        Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
+                            Surface(
+                                color = CardColor,
+                                shape = RoundedCornerShape(12.dp),
+                                shadowElevation = 2.dp
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    TypingDotsAnimation()
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             // Input Area
@@ -272,6 +343,7 @@ fun AIModalScreen(onClose: () -> Unit) {
                         value = promptText,
                         onValueChange = { promptText = it },
                         modifier = Modifier.padding(16.dp),
+                        enabled = !isAiThinking && !isTyping,
                         decorationBox = { inner -> 
                             if (promptText.isEmpty()) Text("Ask ChatArena AI...", color = SubTextColor)
                             inner()
@@ -281,12 +353,9 @@ fun AIModalScreen(onClose: () -> Unit) {
                 Spacer(modifier = Modifier.width(12.dp))
                 Surface(
                     shape = CircleShape,
-                    color = PrimaryBlue,
-                    modifier = Modifier.size(48.dp).clickable {
-                        if (promptText.isNotBlank()) {
-                            messages.add(AIMessage(Random.nextInt().toString(), promptText, true))
-                            promptText = ""
-                        }
+                    color = if (promptText.isNotBlank() && !isAiThinking && !isTyping) PrimaryBlue else SubTextColor.copy(alpha = 0.5f),
+                    modifier = Modifier.size(48.dp).clickable(enabled = promptText.isNotBlank() && !isAiThinking && !isTyping) {
+                        sendMessage()
                     }
                 ) {
                     Box(contentAlignment = Alignment.Center) { Text("➤", color = Color.White) }
@@ -295,6 +364,20 @@ fun AIModalScreen(onClose: () -> Unit) {
         }
     }
 }
+
+// Chhota sa animation function (3 Dots ke liye)
+@Composable
+fun TypingDotsAnimation() {
+    var dotCount by remember { mutableStateOf(1) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(400)
+            dotCount = if (dotCount == 3) 1 else dotCount + 1
+        }
+    }
+    Text(text = ".".repeat(dotCount), color = TextColor, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+}
+
 
 @Composable
 fun SettingsModal(email: String, onClose: () -> Unit, onLogout: () -> Unit) {
