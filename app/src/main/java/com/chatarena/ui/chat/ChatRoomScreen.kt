@@ -1,220 +1,232 @@
-package com.chatarena.ui.chat
+package com.chatarena.ui.main
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.chatarena.ui.auth.*
-
-data class Message(
-    val id: String,
-    val text: String,
-    val isMine: Boolean,
-    val senderName: String,
-    val type: String = "text", // "text", "image", "video"
-    val status: String = "sent", // sent, delivered, read
-    val replyToId: String? = null
-)
+import com.chatarena.ChatItem
+import com.chatarena.network.ChatWebSocketClient
+import com.chatarena.network.Message
+import com.chatarena.network.SendMessagePayload
+import com.chatarena.ui.auth.BgColor
+import com.chatarena.ui.auth.CardColor
+import com.chatarena.ui.auth.PrimaryBlue
+import com.chatarena.ui.auth.SubTextColor
+import com.chatarena.ui.auth.TextColor
+import com.chatarena.ui.camera.CameraScreen
+import com.chatarena.utils.TokenManager
+import kotlinx.coroutines.launch
+import java.util.UUID
 
 @Composable
 fun ChatRoomScreen(
-    chatName: String = "User",
-    isGroupChat: Boolean = false,
-    messages: List<Message> = emptyList(),
-    onBackClick: () -> Unit = {},
-    onSendMessage: (String) -> Unit = {}
+    chatItem: ChatItem,
+    onBack: () -> Unit
 ) {
-    var messageText by remember { mutableStateOf("") }
-    var selectedMessages by remember { mutableStateOf<List<Message>>(emptyList()) }
-    var replyToMessage by remember { mutableStateOf<Message?>(null) }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val listState = rememberLazyListState()
     
-    var showDeleteModal by remember { mutableStateOf(false) }
-    var showEditModal by remember { mutableStateOf(false) }
-    var editingText by remember { mutableStateOf("") }
+    val currentUserCode = TokenManager.getUserCode(context) ?: ""
+    val token = TokenManager.getToken(context) ?: ""
+    
+    var messageText by remember { mutableStateOf("") }
+    var showCamera by remember { mutableStateOf(false) }
+    
+    // Messages ki state
+    val messages = remember { mutableStateListOf<Message>() }
 
-    Column(modifier = Modifier.fillMaxSize().background(BgColor)) {
-        // Header
-        ChatHeader(chatName, isGroupChat, onBackClick)
-        
-        // Selected Messages Action Bar
-        if (selectedMessages.isNotEmpty()) {
-            FloatingActionBar(
-                count = selectedMessages.size,
-                onClear = { selectedMessages = emptyList() },
-                onReply = { 
-                    replyToMessage = selectedMessages.first()
-                    selectedMessages = emptyList() 
-                },
-                onDelete = { showDeleteModal = true }
-            )
-        }
+    // 1. WebSocket Connect & Listen
+    LaunchedEffect(Unit) {
+        ChatWebSocketClient.connect(currentUserCode, token)
 
-        // Message List
-        LazyColumn(
-            modifier = Modifier.weight(1f).padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            reverseLayout = false
-        ) {
-            items(messages, key = { it.id }) { msg ->
-                MessageBubble(
-                    message = msg,
-                    isSelected = selectedMessages.contains(msg),
-                    onLongClick = { 
-                        if (!selectedMessages.contains(msg)) {
-                            selectedMessages = selectedMessages + msg 
-                        }
+        ChatWebSocketClient.socketEvents.collect { response ->
+            if (response.type == "receive-message" && response.payload?.message != null) {
+                val newMsg = response.payload.message
+                if (newMsg.senderCode == chatItem.id || newMsg.senderCode == currentUserCode) {
+                    messages.add(newMsg)
+                    if (messages.isNotEmpty()) {
+                        listState.animateScrollToItem(messages.size - 1)
                     }
-                )
+                }
             }
         }
+    }
 
-        // Reply Bar
-        if (replyToMessage != null) {
+    // 2. Message Send Logic
+    fun sendMessage() {
+        if (messageText.isBlank()) return
+        
+        val clientMsgId = UUID.randomUUID().toString()
+        val payload = SendMessagePayload(
+            receiverCode = chatItem.id,
+            text = messageText.trim(),
+            clientMessageId = clientMsgId
+        )
+
+        val localMsg = Message(
+            clientMessageId = clientMsgId,
+            text = messageText.trim(),
+            senderCode = currentUserCode,
+            mine = true,
+            status = "pending",
+            createdAt = System.currentTimeMillis()
+        )
+        messages.add(localMsg)
+        
+        ChatWebSocketClient.sendMessage(payload)
+        
+        messageText = ""
+        
+        scope.launch {
+            listState.animateScrollToItem(messages.size - 1)
+        }
+    }
+
+    // Camera Screen Overlay
+    if (showCamera) {
+        CameraScreen(
+            onPhotoCaptured = { uri ->
+                showCamera = false
+            },
+            onClose = { showCamera = false }
+        )
+    } else {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(BgColor)
+                .windowInsetsPadding(WindowInsets.safeDrawing)
+        ) {
+            // --- Top Bar ---
             Row(
-                modifier = Modifier.fillMaxWidth().background(CardColor).padding(8.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(CardColor)
+                    .padding(horizontal = 12.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(modifier = Modifier.weight(1f).padding(start = 8.dp)) {
-                    Text("Replying to ${replyToMessage?.senderName}", color = PrimaryBlue, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    Text(replyToMessage?.text ?: "Media", color = SubTextColor, fontSize = 13.sp, maxLines = 1)
-                }
-                Text("✕", color = SubTextColor, fontSize = 20.sp, modifier = Modifier.clickable { replyToMessage = null }.padding(8.dp))
-            }
-        }
-
-        // Input Area
-        Row(
-            modifier = Modifier.fillMaxWidth().background(CardColor).padding(8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text("📎", fontSize = 24.sp, modifier = Modifier.padding(horizontal = 8.dp))
-            
-            Surface(
-                modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(20.dp),
-                color = BgColor, shadowElevation = 2.dp
-            ) {
-                BasicTextField(
-                    value = messageText,
-                    onValueChange = { messageText = it },
-                    modifier = Modifier.padding(12.dp),
-                    decorationBox = { inner ->
-                        if (messageText.isEmpty()) Text("Type a message...", color = SubTextColor)
-                        inner()
-                    }
+                Icon(
+                    imageVector = Icons.Default.ArrowBack,
+                    contentDescription = "Back",
+                    tint = PrimaryBlue,
+                    modifier = Modifier
+                        .size(28.dp)
+                        .clickable { onBack() }
                 )
-            }
-            
-            Box(
-                modifier = Modifier.size(48.dp).background(PrimaryBlue, CircleShape).clickable {
-                    if (messageText.isNotBlank()) {
-                        onSendMessage(messageText)
-                        messageText = ""
-                        replyToMessage = null
-                    }
-                },
-                contentAlignment = Alignment.Center
-            ) {
-                Text("➤", color = Color.White, fontSize = 20.sp)
-            }
-        }
-    }
-
-    // Modals
-    if (showDeleteModal) {
-        AlertDialog(
-            onDismissRequest = { showDeleteModal = false },
-            containerColor = CardColor,
-            title = { Text("Delete Message?") },
-            text = { Text("Are you sure you want to delete this message?") },
-            confirmButton = {
-                TextButton(onClick = { showDeleteModal = false; selectedMessages = emptyList() }) {
-                    Text("Delete for Me", color = DangerRed)
+                Spacer(modifier = Modifier.width(16.dp))
+                
+                Box(
+                    modifier = Modifier.size(40.dp).background(BgColor, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(chatItem.name.take(1).uppercase(), fontWeight = FontWeight.Bold, color = PrimaryBlue)
                 }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDeleteModal = false }) { Text("Cancel") }
+                
+                Spacer(modifier = Modifier.width(12.dp))
+                Column {
+                    Text(chatItem.name, color = TextColor, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Text("Tap here for contact info", color = SubTextColor, fontSize = 12.sp)
+                }
             }
-        )
+
+            // --- Messages List ---
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(vertical = 16.dp)
+            ) {
+                items(messages) { msg ->
+                    MessageBubbleItem(msg)
+                }
+            }
+
+            // --- Input Area ---
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(CardColor)
+                    .padding(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = { showCamera = true }) {
+                    Icon(Icons.Default.PhotoCamera, contentDescription = "Camera", tint = PrimaryBlue)
+                }
+
+                Surface(
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(24.dp),
+                    color = BgColor,
+                    shadowElevation = 4.dp
+                ) {
+                    BasicTextField(
+                        value = messageText,
+                        onValueChange = { messageText = it },
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                        textStyle = TextStyle(color = TextColor, fontSize = 15.sp),
+                        decorationBox = { inner ->
+                            if (messageText.isEmpty()) Text("Message", color = SubTextColor)
+                            inner()
+                        }
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(8.dp))
+
+                IconButton(
+                    onClick = { sendMessage() },
+                    modifier = Modifier.background(PrimaryBlue, CircleShape)
+                ) {
+                    Icon(Icons.Default.Send, contentDescription = "Send", tint = Color.White)
+                }
+            }
+        }
     }
 }
 
 @Composable
-fun ChatHeader(name: String, isGroup: Boolean, onBack: () -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth().background(CardColor).padding(16.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text("⬅", fontSize = 24.sp, color = PrimaryBlue, modifier = Modifier.clickable { onBack() })
-        Spacer(modifier = Modifier.width(16.dp))
-        Box(modifier = Modifier.size(40.dp).background(BgColor, CircleShape), contentAlignment = Alignment.Center) {
-            Text(name.take(1).uppercase(), color = PrimaryBlue, fontWeight = FontWeight.Bold)
-        }
-        Spacer(modifier = Modifier.width(12.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(name, color = TextColor, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-            if (isGroup) Text("Group", color = SubTextColor, fontSize = 12.sp)
-        }
-        Text("📞", fontSize = 20.sp, modifier = Modifier.padding(8.dp))
-        Text("📹", fontSize = 20.sp, modifier = Modifier.padding(8.dp))
-    }
-}
-
-@Composable
-fun MessageBubble(message: Message, isSelected: Boolean, onLongClick: () -> Unit) {
+fun MessageBubbleItem(msg: Message) {
     Box(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-        contentAlignment = if (message.isMine) Alignment.CenterEnd else Alignment.CenterStart
+        modifier = Modifier.fillMaxWidth(),
+        contentAlignment = if (msg.mine) Alignment.CenterEnd else Alignment.CenterStart
     ) {
         Surface(
-            color = if (isSelected) PrimaryBlue.copy(alpha = 0.3f) else if (message.isMine) PrimaryBlue else CardColor,
-            shape = RoundedCornerShape(12.dp),
-            shadowElevation = 1.dp,
-            modifier = Modifier.widthIn(max = 280.dp).clickable { onLongClick() }
+            color = if (msg.mine) PrimaryBlue else CardColor,
+            shape = RoundedCornerShape(
+                topStart = 16.dp,
+                topEnd = 16.dp,
+                bottomStart = if (msg.mine) 16.dp else 4.dp,
+                bottomEnd = if (msg.mine) 4.dp else 16.dp
+            ),
+            shadowElevation = 2.dp,
+            modifier = Modifier.widthIn(max = 280.dp)
         ) {
-            Column(modifier = Modifier.padding(12.dp)) {
-                if (!message.isMine) {
-                    Text(message.senderName, color = PrimaryBlue, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 4.dp))
-                }
+            Column(modifier = Modifier.padding(10.dp)) {
                 Text(
-                    text = message.text,
-                    color = if (message.isMine) Color.White else TextColor,
+                    text = msg.text,
+                    color = if (msg.mine) Color.White else TextColor,
                     fontSize = 15.sp
                 )
-            }
-        }
-    }
-}
-
-@Composable
-fun FloatingActionBar(count: Int, onClear: () -> Unit, onReply: () -> Unit, onDelete: () -> Unit) {
-    Surface(
-        modifier = Modifier.fillMaxWidth().padding(8.dp),
-        shape = RoundedCornerShape(16.dp),
-        color = CardColor, shadowElevation = 8.dp
-    ) {
-        Row(modifier = Modifier.padding(12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("⬅", color = PrimaryBlue, modifier = Modifier.clickable { onClear() })
-                Spacer(modifier = Modifier.width(12.dp))
-                Text("$count selected", fontWeight = FontWeight.Bold, color = TextColor)
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                if (count == 1) Text("↩", fontSize = 20.sp, color = PrimaryBlue, modifier = Modifier.clickable { onReply() })
-                Text("🗑", fontSize = 20.sp, color = DangerRed, modifier = Modifier.clickable { onDelete() })
             }
         }
     }
