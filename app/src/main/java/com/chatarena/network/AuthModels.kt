@@ -23,13 +23,13 @@ data class VerifyRequest(
 data class VerifyResponse(
     val success: Boolean,
     val ticket: String? = null,
-    @SerializedName("chat_token") val chatToken: String? = null, // Go me chat_token hai, Kotlin me chatToken banaya
+    @SerializedName("chat_token") val chatToken: String? = null,
     val email: String? = null,
     val user: UserData? = null,
     val error: String? = null
 )
 
-// 3. User Data Model (Jo tere Go backend ke models.User se match karta hai)
+// 3. User Data Model
 data class UserData(
     @SerializedName("userCode") val userCode: String,
     val email: String,
@@ -40,9 +40,20 @@ data class UserData(
     @SerializedName("publicKey") val publicKey: String? = null
 )
 
-// 4. Update Profile Request (Naya User save karne ke liye)
+// 4. Update Profile Request
 data class UpdateProfileRequest(
     val fullName: String,
     val mobile: String,
     val publicKey: String = ""
+)
+
+// 5. AI Chat Request & Response
+data class AIRequest(
+    val message: String
+)
+
+data class AIResponse(
+    val success: Boolean,
+    val reply: String? = null,
+    val error: String? = null
 )
