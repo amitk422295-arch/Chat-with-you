@@ -2,8 +2,10 @@ package com.chatarena.network
 
 import retrofit2.Response
 import retrofit2.http.Body
+import retrofit2.http.GET
 import retrofit2.http.Header
 import retrofit2.http.POST
+import retrofit2.http.Query
 
 interface ApiService {
 
@@ -28,4 +30,11 @@ interface ApiService {
         @Header("Authorization") token: String,
         @Body request: AIRequest
     ): Response<AIResponse>
+
+    // 5. Mobile number se user search karne ke liye (NAYA ADD KIYA)
+    @GET("api/user/search")
+    suspend fun searchUser(
+        @Header("Authorization") token: String,
+        @Query("mobile") mobile: String
+    ): Response<SearchUserResponse>
 }
