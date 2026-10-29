@@ -1,5 +1,6 @@
 package com.chatarena.ui.main
 
+import kotlinx.coroutines.delay
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.background
