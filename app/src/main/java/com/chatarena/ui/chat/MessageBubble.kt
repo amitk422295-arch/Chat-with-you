@@ -80,10 +80,11 @@ fun MessageBubble(
         }
     )
 
+    // 🔥 YAHAN PADDING 1.dp KAR DI HAI 🔥
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 4.dp),
+            .padding(vertical = 1.dp), 
         contentAlignment = if (isMine) Alignment.CenterEnd else Alignment.CenterStart
     ) {
         if (showReplyIcon) {
@@ -97,29 +98,42 @@ fun MessageBubble(
             )
         }
 
+        // THE MODERN TAG STYLE SHAPE (Asymmetric Cut)
+        val bubbleShape = if (isMine) {
+            RoundedCornerShape(
+                topStart = 16.dp,
+                topEnd = 16.dp,
+                bottomEnd = 2.dp, // Sharp Cut for Sender
+                bottomStart = 16.dp
+            )
+        } else {
+            RoundedCornerShape(
+                topStart = 16.dp,
+                topEnd = 16.dp,
+                bottomEnd = 16.dp,
+                bottomStart = 2.dp // Sharp Cut for Receiver
+            )
+        }
+
         Surface(
             modifier = Modifier
                 .widthIn(max = 280.dp)
                 .graphicsLayer { translationX = swipeOffsetX }
                 .then(dragModifier)
                 .then(clickModifier),
-            shape = RoundedCornerShape(
-                topStart = 16.dp, topEnd = 16.dp,
-                bottomStart = if (isMine) 16.dp else 4.dp,
-                bottomEnd = if (isMine) 4.dp else 16.dp
-            ),
+            shape = bubbleShape, 
             color = when {
                 isSelected -> PrimaryBlue.copy(alpha = 0.3f)
                 isDeleted -> Color.Transparent
                 isMine -> PrimaryBlue
                 else -> CardColor
             },
-            shadowElevation = if (isDeleted) 0.dp else 2.dp
+            shadowElevation = if (isDeleted) 0.dp else 1.dp
         ) {
             Column(
                 modifier = Modifier
-                    .then(if (isDeleted) Modifier.border(1.dp, SubTextColor.copy(alpha = 0.5f), RoundedCornerShape(12.dp)) else Modifier)
-                    .padding(12.dp)
+                    .then(if (isDeleted) Modifier.border(1.dp, SubTextColor.copy(alpha = 0.5f), bubbleShape) else Modifier)
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
             ) {
                 if (showSender && !isMine && !isDeleted) {
                     Text(
@@ -182,9 +196,7 @@ fun MessageBubble(
                     )
                 }
 
-                // ==========================================
-                // 🔥 TIME & STATUS TICKS (WhatsApp Style) 🔥
-                // ==========================================
+                // Time & Status Ticks
                 Row(
                     modifier = Modifier.align(Alignment.End).padding(top = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
@@ -198,10 +210,8 @@ fun MessageBubble(
                     if (isMine) {
                         Spacer(modifier = Modifier.width(4.dp))
                         
-                        // Status logic based on message.status
                         when (message.status) {
                             "pending" -> {
-                                // Ghadi (Clock) - Server tak nahi pahuncha
                                 Icon(
                                     imageVector = Icons.Default.Schedule,
                                     contentDescription = "Pending",
@@ -210,7 +220,6 @@ fun MessageBubble(
                                 )
                             }
                             "sent" -> {
-                                // Single Tick - Server tak pahunch gaya
                                 Icon(
                                     imageVector = Icons.Default.Done,
                                     contentDescription = "Sent",
@@ -219,7 +228,6 @@ fun MessageBubble(
                                 )
                             }
                             "delivered" -> {
-                                // Double Tick - Device tak pahunch gaya
                                 Icon(
                                     imageVector = Icons.Default.DoneAll,
                                     contentDescription = "Delivered",
@@ -228,16 +236,14 @@ fun MessageBubble(
                                 )
                             }
                             "read" -> {
-                                // Blue Glowing Double Tick - Padh liya
                                 Icon(
                                     imageVector = Icons.Default.DoneAll,
                                     contentDescription = "Read",
-                                    tint = Color(0xFF00E5FF), // Bright Cyan/Blue color for glow effect
+                                    tint = Color(0xFF00E5FF), // Glowing Blue Tick
                                     modifier = Modifier.size(14.dp)
                                 )
                             }
                             else -> {
-                                // Fallback
                                 Icon(
                                     imageVector = Icons.Default.Done,
                                     contentDescription = "Sent",
