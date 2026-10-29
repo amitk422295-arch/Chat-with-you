@@ -80,7 +80,8 @@ fun ChatRoomScreen(
             status = entity.status,
             createdAt = entity.createdAt,
             replyTo = entity.replyTo,
-            isDeleted = entity.isDeleted
+            // 🔥 FIX 1: Int ko Boolean mein convert kiya
+            isDeleted = if (entity.isDeleted) 1 else 0
         )
     }
 
@@ -144,7 +145,8 @@ fun ChatRoomScreen(
                                     status = msg.status ?: "sent",
                                     createdAt = msg.createdAt ?: System.currentTimeMillis(),
                                     replyTo = msg.replyTo,
-                                    isDeleted = msg.isDeleted ?: false
+                                    // 🔥 FIX 2: Int ko Boolean mein convert kiya
+                                    isDeleted = (msg.isDeleted ?: 0) == 1
                                 )
                                 
                                 messageDao.insertMessage(entity)
@@ -173,7 +175,6 @@ fun ChatRoomScreen(
             isKeyLoaded = true
             isKeyLoading = false
             
-            // FIX: Wait for socket connection before fetching history
             scope.launch {
                 ChatWebSocketClient.connectionState.collect { isConnected ->
                     if (isConnected) {
@@ -182,7 +183,6 @@ fun ChatRoomScreen(
                 }
             }
         } else {
-            // FIX: Wait for socket connection before fetching Public Key
             scope.launch {
                 ChatWebSocketClient.connectionState.collect { isConnected ->
                     if (isConnected && targetPublicKey == null && isKeyLoading) {
@@ -229,7 +229,8 @@ fun ChatRoomScreen(
                             status = newMsg.status ?: "sent",
                             createdAt = newMsg.createdAt ?: System.currentTimeMillis(),
                             replyTo = newMsg.replyTo,
-                            isDeleted = newMsg.isDeleted ?: false
+                            // 🔥 FIX 3: Int ko Boolean mein convert kiya
+                            isDeleted = (newMsg.isDeleted ?: 0) == 1
                         )
                         
                         withContext(Dispatchers.IO) {
@@ -275,13 +276,16 @@ fun ChatRoomScreen(
             return
         }
 
+        // 🔥 FIX 4: Backend ke liye E2E: prefix add kiya
+        val finalEncryptedText = if (encryptedText.startsWith("E2E:")) encryptedText else "E2E:$encryptedText"
+
         val localEntity = MessageEntity(
             messageId = clientMsgId,
             clientMessageId = clientMsgId,
             chatId = chatItem.id,
             senderCode = currentUserCode,
             receiverCode = chatItem.id,
-            encryptedText = encryptedText,
+            encryptedText = finalEncryptedText, // Yahan bhi final text save karein
             decryptedText = plainText, 
             status = "pending",
             createdAt = System.currentTimeMillis()
@@ -295,7 +299,7 @@ fun ChatRoomScreen(
 
         val payload = SendMessagePayload(
             targetCode = chatItem.id, 
-            text = encryptedText, 
+            text = finalEncryptedText, // 🔥 Yahan final text bhejein
             clientMessageId = clientMsgId,
             messageType = "text",
             senderName = TokenManager.getFullName(context),
@@ -313,6 +317,7 @@ fun ChatRoomScreen(
         }
     }
 
+    // ... (UI part same rahega, isme koi change nahi hai)
     if (showCamera) {
         CameraScreen(
             onPhotoCaptured = { uri -> showCamera = false },
