@@ -20,7 +20,7 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.chatarena.network.Message // Naya Import
+import com.chatarena.network.Message
 import com.chatarena.ui.auth.*
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -43,8 +43,8 @@ fun MessageBubble(
     var swipeOffsetX by remember { mutableStateOf(0f) }
     var showReplyIcon by remember { mutableStateOf(false) }
 
-    // Model ke hisaab se isDeleted check fix kiya gaya hai
-    val isDeleted = message.isDeleted || message.text == "This message was deleted"
+    // 🔥 FIX: Yahan (message.isDeleted == 1) kar diya hai
+    val isDeleted = (message.isDeleted == 1) || message.text == "This message was deleted"
     val isTextUnavailable = message.text == "🔒 Message Unavailable" || message.text == "🔒 Message Error"
 
     // Swipe to reply logic
@@ -127,7 +127,7 @@ fun MessageBubble(
                 // Sender Name (For Group Chats)
                 if (showSender && !isMine && !isDeleted) {
                     Text(
-                        text = message.senderName ?: "Unknown", // Null safety fix
+                        text = message.senderName ?: "Unknown",
                         color = PrimaryBlue,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
@@ -135,7 +135,7 @@ fun MessageBubble(
                     )
                 }
 
-                // Reply Preview (Property name fix kiya hai: replyToId -> replyTo)
+                // Reply Preview
                 if (message.replyTo != null && !isDeleted) {
                     Surface(
                         color = Color.Black.copy(alpha = 0.1f),
@@ -155,7 +155,7 @@ fun MessageBubble(
                     }
                 }
 
-                // Content (Property name fix kiya hai: type -> messageType)
+                // Content
                 if (isDeleted) {
                     Text(
                         text = "This message was deleted",
@@ -194,7 +194,7 @@ fun MessageBubble(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = formatTime(message.createdAt), // Asli time format function
+                        text = formatTime(message.createdAt),
                         color = if (isMine) Color.White.copy(alpha = 0.7f) else SubTextColor,
                         fontSize = 10.sp
                     )
