@@ -62,10 +62,10 @@ fun ChatRoomScreen(
     val db = AppDatabase.getDatabase(context)
     val messageDao = db.messageDao()
 
-    // 2. Observe messages from DB (Single Source of Truth)
+    // 2. Observe messages from DB (UI auto-update hoga)
     val messagesEntity by messageDao.getMessagesForChat(chatItem.id).collectAsState(initial = emptyList())
 
-    // 3. Convert Entity to UI Model
+    // 3. Convert Entity to UI Model for MessageBubble
     val messages = messagesEntity.map { entity ->
         Message(
             messageId = entity.messageId,
@@ -78,8 +78,7 @@ fun ChatRoomScreen(
             status = entity.status,
             createdAt = entity.createdAt,
             replyTo = entity.replyTo,
-            // 🔥 FIX: Dono Int hain, direct pass karo
-            isDeleted = entity.isDeleted 
+            isDeleted = entity.isDeleted
         )
     }
 
@@ -88,13 +87,14 @@ fun ChatRoomScreen(
     var isKeyLoaded by remember { mutableStateOf(false) }
     var isKeyLoading by remember { mutableStateOf(true) }
 
-    // Auto Scroll to bottom
+    // Auto Scroll to bottom when new message arrives
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) {
             listState.animateScrollToItem(messages.size - 1)
         }
     }
 
+    // Fetch Public Key
     fun fetchPublicKey(onKeyFetched: () -> Unit) {
         isKeyLoading = true
         ChatWebSocketClient.getPublicKey(chatItem.id) { pubKey ->
@@ -109,6 +109,7 @@ fun ChatRoomScreen(
         }
     }
 
+    // Fetch History
     fun fetchMessageHistory(pubKey: String?) {
         ChatWebSocketClient.getMessages(chatItem.id) { response ->
             if (response != null && response.has("success") && response.get("success").asBoolean) {
@@ -121,11 +122,16 @@ fun ChatRoomScreen(
                                 val msgObj = element.asJsonObject
                                 val msg = gson.fromJson(msgObj, Message::class.java)
                                 
-                                val decryptedText = if (msg.messageType == "text" && pubKey != null && msg.text.startsWith("E2E:")) {
+                                val decryptedText = if (msg.messageType == "text" && msg.text.startsWith("E2E:")) {
                                     try {
-                                        CryptoManager.decryptText(context, msg.text, msg.senderCode ?: "", pubKey)
+                                        val keyToUse = pubKey ?: CryptoManager.getPublicKeyFromDisk(context, msg.senderCode ?: "")
+                                        if (keyToUse != null) {
+                                            CryptoManager.decryptText(context, msg.text, msg.senderCode ?: "", keyToUse)
+                                        } else {
+                                            "🔒 Key Missing"
+                                        }
                                     } catch (e: Exception) {
-                                        "🔒 Encrypted Message"
+                                        "🔒 Decryption Failed"
                                     }
                                 } else {
                                     msg.text
@@ -143,12 +149,12 @@ fun ChatRoomScreen(
                                     status = msg.status ?: "sent",
                                     createdAt = msg.createdAt ?: System.currentTimeMillis(),
                                     replyTo = msg.replyTo,
-                                    // 🔥 FIX: msg.isDeleted is Int, MessageEntity.isDeleted is Int
                                     isDeleted = msg.isDeleted ?: 0
                                 )
                                 
                                 messageDao.insertMessage(entity)
 
+                                // Agar dusre ka message hai, toh Delivered aur Read mark karo
                                 if (msg.senderCode != currentUserCode && msg.messageId != null) {
                                     ChatWebSocketClient.sendMessageReceived(msg.messageId, msg.senderCode)
                                     ChatWebSocketClient.markMessageRead(msg.messageId, msg.senderCode)
@@ -164,9 +170,7 @@ fun ChatRoomScreen(
     }
 
     LaunchedEffect(Unit) {
-        // ❌ YAHAN SE ChatWebSocketClient.connect() HATA DIYA HAI (GlobalChatManager handles it)
-        // ❌ YAHAN SE socketEvents.collect HATA DIYA HAI (GlobalChatManager handles it)
-        
+        // Note: Socket connect() ab GlobalChatManager karta hai, isliye yahan nahi hai.
         val cachedKey = CryptoManager.getPublicKeyFromDisk(context, chatItem.id)
         
         if (cachedKey != null) {
@@ -225,11 +229,12 @@ fun ChatRoomScreen(
             return
         }
 
-        // 🔥 FIX: Backend ke liye E2E: prefix
+        // Backend requires 'E2E:' prefix
         val finalEncryptedText = if (encryptedText.startsWith("E2E:")) encryptedText else "E2E:$encryptedText"
 
+        // 1. Save locally as PENDING (Clock Icon)
         val localEntity = MessageEntity(
-            messageId = clientMsgId,
+            messageId = clientMsgId, // Temporarily using client ID as primary key
             clientMessageId = clientMsgId,
             chatId = chatItem.id,
             senderCode = currentUserCode,
@@ -238,7 +243,7 @@ fun ChatRoomScreen(
             decryptedText = plainText, 
             status = "pending",
             createdAt = System.currentTimeMillis(),
-            isDeleted = 0 // Default Int
+            isDeleted = 0
         )
         
         scope.launch(Dispatchers.IO) {
@@ -247,6 +252,7 @@ fun ChatRoomScreen(
         
         messageText = ""
 
+        // 2. Send to Server
         val payload = SendMessagePayload(
             targetCode = chatItem.id, 
             text = finalEncryptedText,
@@ -259,16 +265,25 @@ fun ChatRoomScreen(
 
         ChatWebSocketClient.sendMessage(payload) { response ->
             val isSuccess = response != null && response.has("success") && response.get("success").asBoolean
-            val newStatus = if (isSuccess) "sent" else "failed"
             
             scope.launch(Dispatchers.IO) {
-                // DAO me updateMessageStatusByClientId use karein (jo humne banaya tha)
-                messageDao.updateMessageStatusByClientId(clientMsgId, newStatus)
+                if (isSuccess && response!!.has("message")) {
+                    // 🔥 FIX: Server ka asli messageId aur time nikaal kar DB update karein
+                    val msgObj = response.getAsJsonObject("message")
+                    val serverId = msgObj.get("messageId").asString
+                    val serverTime = msgObj.get("createdAt").asLong
+                    
+                    // DB me Client ID ko Server ID se replace karo aur status 'sent' karo
+                    messageDao.updateMessageWithServerDetails(clientMsgId, serverId, serverTime)
+                } else {
+                    // Agar server fail ho jaye toh status 'failed' karo
+                    messageDao.updateMessageStatusByClientId(clientMsgId, "failed")
+                }
             }
         }
     }
 
-    // ================= UI PART (No Changes) =================
+    // ================= UI PART =================
     if (showCamera) {
         CameraScreen(
             onPhotoCaptured = { uri -> showCamera = false },
@@ -281,6 +296,7 @@ fun ChatRoomScreen(
                 .background(BgColor)
                 .windowInsetsPadding(WindowInsets.safeDrawing)
         ) {
+            // Top Bar
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -312,6 +328,7 @@ fun ChatRoomScreen(
                 }
             }
 
+            // Chat Messages List
             LazyColumn(
                 state = listState,
                 modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
@@ -334,6 +351,7 @@ fun ChatRoomScreen(
                 }
             }
 
+            // Bottom Input Area
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
