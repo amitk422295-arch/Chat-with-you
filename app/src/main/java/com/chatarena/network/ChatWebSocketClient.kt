@@ -95,7 +95,23 @@ object ChatWebSocketClient {
                     }
 
                     val payload = jsonObject.getAsJsonObject("payload")
-                    val socketPayload = gson.fromJson(payload, SocketPayload::class.java)
+                    var socketPayload = gson.fromJson(payload, SocketPayload::class.java)
+
+                    // ==========================================
+                    // FIX: JSON PARSING MISMATCH
+                    // Agar backend ne message ko "message" object me wrap nahi kiya hai (flat JSON bheja hai), 
+                    // toh use direct parse karke SocketPayload me daal do.
+                    // ==========================================
+                    if (socketPayload.message == null && (payload.has("messageId") || payload.has("text") || payload.has("clientMessageId"))) {
+                        val directMessage = gson.fromJson(payload, Message::class.java)
+                        socketPayload = SocketPayload(
+                            message = directMessage,
+                            senderCode = socketPayload.senderCode ?: directMessage.senderCode,
+                            receiverCode = socketPayload.receiverCode ?: directMessage.receiverCode,
+                            isTyping = socketPayload.isTyping
+                        )
+                    }
+
                     _socketEvents.tryEmit(SocketResponse(type, socketPayload))
 
                 } catch (e: Exception) {
@@ -141,9 +157,6 @@ object ChatWebSocketClient {
         }
     }
 
-    // ==========================================
-    // NAYA FUNCTION: Purane aur Offline Messages Fetch karne ke liye
-    // ==========================================
     fun getMessages(targetCode: String, after: Long? = null, onResult: (JsonObject?) -> Unit) {
         val cbId = cbIdCounter.getAndIncrement()
         val payload = JsonObject().apply {
@@ -160,10 +173,6 @@ object ChatWebSocketClient {
         webSocket?.send(gson.toJson(event))
     }
 
-    // ==========================================
-    // NAYA FUNCTION: Home screen (Inbox) par purani chats fetch karne ke liye
-    // Yahi function miss hone ki wajah se build fail ho raha tha
-    // ==========================================
     fun getRecentChats(onResult: (JsonObject?) -> Unit) {
         val cbId = cbIdCounter.getAndIncrement()
         val payload = JsonObject()
