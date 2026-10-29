@@ -42,7 +42,6 @@ import com.chatarena.utils.TokenManager
 import com.google.gson.Gson
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.util.UUID
 
 @Composable
@@ -55,7 +54,6 @@ fun ChatRoomScreen(
     val listState = rememberLazyListState()
     
     val currentUserCode = TokenManager.getUserCode(context) ?: ""
-    val token = TokenManager.getToken(context) ?: ""
     
     var messageText by remember { mutableStateOf("") }
     var showCamera by remember { mutableStateOf(false) }
@@ -64,7 +62,7 @@ fun ChatRoomScreen(
     val db = AppDatabase.getDatabase(context)
     val messageDao = db.messageDao()
 
-    // 2. Observe messages from DB
+    // 2. Observe messages from DB (Single Source of Truth)
     val messagesEntity by messageDao.getMessagesForChat(chatItem.id).collectAsState(initial = emptyList())
 
     // 3. Convert Entity to UI Model
@@ -80,8 +78,8 @@ fun ChatRoomScreen(
             status = entity.status,
             createdAt = entity.createdAt,
             replyTo = entity.replyTo,
-            // 🔥 FIX 1: Int ko Boolean mein convert kiya
-            isDeleted = if (entity.isDeleted) 1 else 0
+            // 🔥 FIX: Dono Int hain, direct pass karo
+            isDeleted = entity.isDeleted 
         )
     }
 
@@ -90,7 +88,7 @@ fun ChatRoomScreen(
     var isKeyLoaded by remember { mutableStateOf(false) }
     var isKeyLoading by remember { mutableStateOf(true) }
 
-    // Auto Scroll to bottom jab naya message aaye
+    // Auto Scroll to bottom
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) {
             listState.animateScrollToItem(messages.size - 1)
@@ -145,8 +143,8 @@ fun ChatRoomScreen(
                                     status = msg.status ?: "sent",
                                     createdAt = msg.createdAt ?: System.currentTimeMillis(),
                                     replyTo = msg.replyTo,
-                                    // 🔥 FIX 2: Int ko Boolean mein convert kiya
-                                    isDeleted = (msg.isDeleted ?: 0) == 1
+                                    // 🔥 FIX: msg.isDeleted is Int, MessageEntity.isDeleted is Int
+                                    isDeleted = msg.isDeleted ?: 0
                                 )
                                 
                                 messageDao.insertMessage(entity)
@@ -166,7 +164,8 @@ fun ChatRoomScreen(
     }
 
     LaunchedEffect(Unit) {
-        ChatWebSocketClient.connect(currentUserCode, token)
+        // ❌ YAHAN SE ChatWebSocketClient.connect() HATA DIYA HAI (GlobalChatManager handles it)
+        // ❌ YAHAN SE socketEvents.collect HATA DIYA HAI (GlobalChatManager handles it)
         
         val cachedKey = CryptoManager.getPublicKeyFromDisk(context, chatItem.id)
         
@@ -190,56 +189,6 @@ fun ChatRoomScreen(
                             if (targetPublicKey != null) {
                                 fetchMessageHistory(targetPublicKey)
                             }
-                        }
-                    }
-                }
-            }
-        }
-
-        ChatWebSocketClient.socketEvents.collect { response ->
-            if (response.type == "new-message" && response.payload?.message != null) {
-                val newMsg = response.payload.message
-                
-                if (newMsg.senderCode == chatItem.id) {
-                    val senderPubKey = targetPublicKey 
-                    if (senderPubKey != null) {
-                        var decryptedText = newMsg.text
-                        if (newMsg.messageType == "text" && newMsg.text.startsWith("E2E:")) {
-                            try {
-                                decryptedText = CryptoManager.decryptText(
-                                    context = context,
-                                    cipherText = newMsg.text,
-                                    targetCode = newMsg.senderCode ?: "",
-                                    targetPubKeyBase64 = senderPubKey
-                                )
-                            } catch (e: Exception) {
-                                decryptedText = "🔒 Encrypted Message"
-                            }
-                        }
-                        
-                        val entity = MessageEntity(
-                            messageId = newMsg.messageId ?: newMsg.clientMessageId ?: UUID.randomUUID().toString(),
-                            clientMessageId = newMsg.clientMessageId,
-                            chatId = chatItem.id,
-                            senderCode = newMsg.senderCode ?: "",
-                            receiverCode = newMsg.receiverCode,
-                            encryptedText = newMsg.text,
-                            decryptedText = decryptedText,
-                            messageType = newMsg.messageType ?: "text",
-                            status = newMsg.status ?: "sent",
-                            createdAt = newMsg.createdAt ?: System.currentTimeMillis(),
-                            replyTo = newMsg.replyTo,
-                            // 🔥 FIX 3: Int ko Boolean mein convert kiya
-                            isDeleted = (newMsg.isDeleted ?: 0) == 1
-                        )
-                        
-                        withContext(Dispatchers.IO) {
-                            messageDao.insertMessage(entity)
-                        }
-                        
-                        if (newMsg.messageId != null) {
-                             ChatWebSocketClient.sendMessageReceived(newMsg.messageId, newMsg.senderCode ?: "")
-                             ChatWebSocketClient.markMessageRead(newMsg.messageId, newMsg.senderCode ?: "")
                         }
                     }
                 }
@@ -276,7 +225,7 @@ fun ChatRoomScreen(
             return
         }
 
-        // 🔥 FIX 4: Backend ke liye E2E: prefix add kiya
+        // 🔥 FIX: Backend ke liye E2E: prefix
         val finalEncryptedText = if (encryptedText.startsWith("E2E:")) encryptedText else "E2E:$encryptedText"
 
         val localEntity = MessageEntity(
@@ -285,10 +234,11 @@ fun ChatRoomScreen(
             chatId = chatItem.id,
             senderCode = currentUserCode,
             receiverCode = chatItem.id,
-            encryptedText = finalEncryptedText, // Yahan bhi final text save karein
+            encryptedText = finalEncryptedText,
             decryptedText = plainText, 
             status = "pending",
-            createdAt = System.currentTimeMillis()
+            createdAt = System.currentTimeMillis(),
+            isDeleted = 0 // Default Int
         )
         
         scope.launch(Dispatchers.IO) {
@@ -299,7 +249,7 @@ fun ChatRoomScreen(
 
         val payload = SendMessagePayload(
             targetCode = chatItem.id, 
-            text = finalEncryptedText, // 🔥 Yahan final text bhejein
+            text = finalEncryptedText,
             clientMessageId = clientMsgId,
             messageType = "text",
             senderName = TokenManager.getFullName(context),
@@ -312,12 +262,13 @@ fun ChatRoomScreen(
             val newStatus = if (isSuccess) "sent" else "failed"
             
             scope.launch(Dispatchers.IO) {
-                messageDao.updateMessageStatus(clientMsgId, newStatus)
+                // DAO me updateMessageStatusByClientId use karein (jo humne banaya tha)
+                messageDao.updateMessageStatusByClientId(clientMsgId, newStatus)
             }
         }
     }
 
-    // ... (UI part same rahega, isme koi change nahi hai)
+    // ================= UI PART (No Changes) =================
     if (showCamera) {
         CameraScreen(
             onPhotoCaptured = { uri -> showCamera = false },
