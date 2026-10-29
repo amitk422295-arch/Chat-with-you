@@ -110,7 +110,6 @@ fun ChatRoomScreen(
         }
     }
 
-    // NAYA: Function to fetch history from backend
     fun fetchMessageHistory(pubKey: String?) {
         ChatWebSocketClient.getMessages(chatItem.id) { response ->
             if (response != null && response.has("success") && response.get("success").asBoolean) {
@@ -123,9 +122,12 @@ fun ChatRoomScreen(
                                 val msgObj = element.asJsonObject
                                 val msg = gson.fromJson(msgObj, Message::class.java)
                                 
-                                // Decrypt text if it's a text message
-                                val decryptedText = if (msg.messageType == "text" && pubKey != null) {
-                                    CryptoManager.decryptText(context, msg.text, msg.senderCode ?: "", pubKey)
+                                val decryptedText = if (msg.messageType == "text" && pubKey != null && msg.text.startsWith("E2E:")) {
+                                    try {
+                                        CryptoManager.decryptText(context, msg.text, msg.senderCode ?: "", pubKey)
+                                    } catch (e: Exception) {
+                                        "🔒 Encrypted Message"
+                                    }
                                 } else {
                                     msg.text
                                 }
@@ -145,16 +147,14 @@ fun ChatRoomScreen(
                                     isDeleted = msg.isDeleted ?: false
                                 )
                                 
-                                // Insert into DB (OnConflict REPLACE handles duplicates)
                                 messageDao.insertMessage(entity)
 
-                                // Send ack if it's not mine
                                 if (msg.senderCode != currentUserCode && msg.messageId != null) {
                                     ChatWebSocketClient.sendMessageReceived(msg.messageId, msg.senderCode)
                                     ChatWebSocketClient.markMessageRead(msg.messageId, msg.senderCode)
                                 }
                             } catch (e: Exception) {
-                                // Ignore individual message parsing errors
+                                e.printStackTrace()
                             }
                         }
                     }
@@ -166,25 +166,36 @@ fun ChatRoomScreen(
     LaunchedEffect(Unit) {
         ChatWebSocketClient.connect(currentUserCode, token)
         
-        // Disk se key load karo
         val cachedKey = CryptoManager.getPublicKeyFromDisk(context, chatItem.id)
         
         if (cachedKey != null) {
             targetPublicKey = cachedKey
             isKeyLoaded = true
             isKeyLoading = false
-            // Key mil gayi, ab history fetch karo
-            fetchMessageHistory(cachedKey)
+            
+            // FIX: Wait for socket connection before fetching history
+            scope.launch {
+                ChatWebSocketClient.connectionState.collect { isConnected ->
+                    if (isConnected) {
+                        fetchMessageHistory(cachedKey)
+                    }
+                }
+            }
         } else {
-            fetchPublicKey {
-                // Key WebSocket se mil gayi, ab history fetch karo
-                if (targetPublicKey != null) {
-                    fetchMessageHistory(targetPublicKey)
+            // FIX: Wait for socket connection before fetching Public Key
+            scope.launch {
+                ChatWebSocketClient.connectionState.collect { isConnected ->
+                    if (isConnected && targetPublicKey == null && isKeyLoading) {
+                        fetchPublicKey {
+                            if (targetPublicKey != null) {
+                                fetchMessageHistory(targetPublicKey)
+                            }
+                        }
+                    }
                 }
             }
         }
 
-        // Listen for new incoming messages
         ChatWebSocketClient.socketEvents.collect { response ->
             if (response.type == "new-message" && response.payload?.message != null) {
                 val newMsg = response.payload.message
@@ -192,12 +203,19 @@ fun ChatRoomScreen(
                 if (newMsg.senderCode == chatItem.id) {
                     val senderPubKey = targetPublicKey 
                     if (senderPubKey != null) {
-                        val decryptedText = CryptoManager.decryptText(
-                            context = context,
-                            cipherText = newMsg.text,
-                            targetCode = newMsg.senderCode,
-                            targetPubKeyBase64 = senderPubKey
-                        )
+                        var decryptedText = newMsg.text
+                        if (newMsg.messageType == "text" && newMsg.text.startsWith("E2E:")) {
+                            try {
+                                decryptedText = CryptoManager.decryptText(
+                                    context = context,
+                                    cipherText = newMsg.text,
+                                    targetCode = newMsg.senderCode ?: "",
+                                    targetPubKeyBase64 = senderPubKey
+                                )
+                            } catch (e: Exception) {
+                                decryptedText = "🔒 Encrypted Message"
+                            }
+                        }
                         
                         val entity = MessageEntity(
                             messageId = newMsg.messageId ?: newMsg.clientMessageId ?: UUID.randomUUID().toString(),
@@ -218,7 +236,6 @@ fun ChatRoomScreen(
                             messageDao.insertMessage(entity)
                         }
                         
-                        // Ack back to server
                         if (newMsg.messageId != null) {
                              ChatWebSocketClient.sendMessageReceived(newMsg.messageId, newMsg.senderCode ?: "")
                              ChatWebSocketClient.markMessageRead(newMsg.messageId, newMsg.senderCode ?: "")
