@@ -9,9 +9,12 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
-        // यह लाइन जादुई है: यह सिस्टम को बताती है कि ऐप फुल स्क्रीन (Edge-to-Edge) लेगा 
-        // और Insets (जैसे कीबोर्ड और स्टेटस बार) को Compose खुद हैंडल करेगा।
+        // Edge-to-Edge UI Setup
         WindowCompat.setDecorFitsSystemWindows(window, false)
+        
+        // 🔥 YEH NAYI LINE ADD KAREIN 🔥
+        // App start hote hi WebSocket connect hoga aur background me messages receive hone lagenge
+        GlobalChatManager.init(this) 
         
         setContent {
             AppRoot()
