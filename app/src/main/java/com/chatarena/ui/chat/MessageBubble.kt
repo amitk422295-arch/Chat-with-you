@@ -7,6 +7,11 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Done
+import androidx.compose.material.icons.filled.DoneAll
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -43,7 +48,6 @@ fun MessageBubble(
     var swipeOffsetX by remember { mutableStateOf(0f) }
     var showReplyIcon by remember { mutableStateOf(false) }
 
-    // 🔥 FIX: Yahan (message.isDeleted == 1) kar diya hai
     val isDeleted = (message.isDeleted == 1) || message.text == "This message was deleted"
     val isTextUnavailable = message.text == "🔒 Message Unavailable" || message.text == "🔒 Message Error"
 
@@ -67,17 +71,12 @@ fun MessageBubble(
         )
     }
 
-    // Long press & Click logic
     val clickModifier = Modifier.combinedClickable(
         onClick = {
-            if (isSelectionMode) {
-                onToggleSelection()
-            }
+            if (isSelectionMode) onToggleSelection()
         },
         onLongClick = {
-            if (!isDeleted) {
-                onLongPress()
-            }
+            if (!isDeleted) onLongPress()
         }
     )
 
@@ -87,7 +86,6 @@ fun MessageBubble(
             .padding(vertical = 4.dp),
         contentAlignment = if (isMine) Alignment.CenterEnd else Alignment.CenterStart
     ) {
-        // Swipe Reply Icon (Left side)
         if (showReplyIcon) {
             Text(
                 text = "↩",
@@ -99,7 +97,6 @@ fun MessageBubble(
             )
         }
 
-        // Message Bubble
         Surface(
             modifier = Modifier
                 .widthIn(max = 280.dp)
@@ -124,7 +121,6 @@ fun MessageBubble(
                     .then(if (isDeleted) Modifier.border(1.dp, SubTextColor.copy(alpha = 0.5f), RoundedCornerShape(12.dp)) else Modifier)
                     .padding(12.dp)
             ) {
-                // Sender Name (For Group Chats)
                 if (showSender && !isMine && !isDeleted) {
                     Text(
                         text = message.senderName ?: "Unknown",
@@ -135,7 +131,6 @@ fun MessageBubble(
                     )
                 }
 
-                // Reply Preview
                 if (message.replyTo != null && !isDeleted) {
                     Surface(
                         color = Color.Black.copy(alpha = 0.1f),
@@ -155,7 +150,6 @@ fun MessageBubble(
                     }
                 }
 
-                // Content
                 if (isDeleted) {
                     Text(
                         text = "This message was deleted",
@@ -188,7 +182,9 @@ fun MessageBubble(
                     )
                 }
 
-                // Time & Status
+                // ==========================================
+                // 🔥 TIME & STATUS TICKS (WhatsApp Style) 🔥
+                // ==========================================
                 Row(
                     modifier = Modifier.align(Alignment.End).padding(top = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
@@ -198,13 +194,58 @@ fun MessageBubble(
                         color = if (isMine) Color.White.copy(alpha = 0.7f) else SubTextColor,
                         fontSize = 10.sp
                     )
+                    
                     if (isMine) {
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = if (message.status == "read") "✓✓" else "✓",
-                            color = if (message.status == "read") Color(0xFF34C759) else Color.White.copy(alpha = 0.7f),
-                            fontSize = 10.sp
-                        )
+                        
+                        // Status logic based on message.status
+                        when (message.status) {
+                            "pending" -> {
+                                // Ghadi (Clock) - Server tak nahi pahuncha
+                                Icon(
+                                    imageVector = Icons.Default.Schedule,
+                                    contentDescription = "Pending",
+                                    tint = Color.White.copy(alpha = 0.7f),
+                                    modifier = Modifier.size(12.dp)
+                                )
+                            }
+                            "sent" -> {
+                                // Single Tick - Server tak pahunch gaya
+                                Icon(
+                                    imageVector = Icons.Default.Done,
+                                    contentDescription = "Sent",
+                                    tint = Color.White.copy(alpha = 0.7f),
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            }
+                            "delivered" -> {
+                                // Double Tick - Device tak pahunch gaya
+                                Icon(
+                                    imageVector = Icons.Default.DoneAll,
+                                    contentDescription = "Delivered",
+                                    tint = Color.White.copy(alpha = 0.9f),
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            }
+                            "read" -> {
+                                // Blue Glowing Double Tick - Padh liya
+                                Icon(
+                                    imageVector = Icons.Default.DoneAll,
+                                    contentDescription = "Read",
+                                    tint = Color(0xFF00E5FF), // Bright Cyan/Blue color for glow effect
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            }
+                            else -> {
+                                // Fallback
+                                Icon(
+                                    imageVector = Icons.Default.Done,
+                                    contentDescription = "Sent",
+                                    tint = Color.White.copy(alpha = 0.7f),
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -212,7 +253,6 @@ fun MessageBubble(
     }
 }
 
-// Helper Function: Time ko 12:30 PM jaisa format karne ke liye
 private fun formatTime(timestamp: Long): String {
     return try {
         val sdf = SimpleDateFormat("hh:mm a", Locale.getDefault())
