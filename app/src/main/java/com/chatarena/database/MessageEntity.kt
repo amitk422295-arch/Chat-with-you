@@ -1,9 +1,18 @@
 package com.chatarena.database
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 
-@Entity(tableName = "messages")
+@Entity(
+    tableName = "messages",
+    // 🔥 ADVANCE FIX: Indexes lagaye hain taaki hazaron messages hone par bhi app fast rahe
+    indices = [
+        Index(value = ["chatId"]), 
+        Index(value = ["clientMessageId"]),
+        Index(value = ["createdAt"])
+    ]
+)
 data class MessageEntity(
     @PrimaryKey
     val messageId: String, // Server ka ID ya Client ID
@@ -23,5 +32,7 @@ data class MessageEntity(
     val status: String = "pending",
     val createdAt: Long = System.currentTimeMillis(),
     val replyTo: String? = null,
-    val isDeleted: Boolean = false
+    
+    // 🔥 MAIN FIX: Boolean se Int kar diya, taaki Network model se match kare
+    val isDeleted: Int = 0 
 )
