@@ -16,7 +16,6 @@ object GlobalChatManager {
     private var isInitialized = false
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
-    // 🔥 Is function ko App start hote hi (MainActivity ya AppRoot me) ek baar call karna hai
     fun init(context: Context) {
         if (isInitialized) return
         isInitialized = true
@@ -29,9 +28,11 @@ object GlobalChatManager {
         // 1. Socket Connect karo
         ChatWebSocketClient.connect(currentUserCode, token)
 
-        // 2. GLOBAL LISTENER: Har naya message yahan aayega, chahe user kisi bhi screen par ho
+        // 2. GLOBAL LISTENER
         scope.launch {
             ChatWebSocketClient.socketEvents.collect { response ->
+                
+                // 🔥 PART 1: NAYA MESSAGE AAYE TOH SAVE KARO
                 if (response.type == "new-message" && response.payload?.message != null) {
                     val msg = response.payload.message
                     val isMine = msg.senderCode == currentUserCode
@@ -63,17 +64,26 @@ object GlobalChatManager {
                             status = msg.status ?: "sent",
                             createdAt = msg.createdAt ?: System.currentTimeMillis(),
                             replyTo = msg.replyTo,
-                            isDeleted = msg.isDeleted ?: 0 // Ab yeh Int hai
+                            isDeleted = msg.isDeleted ?: 0
                         )
 
-                        // DB me save karo (UI automatic update ho jayega Flow ki wajah se)
+                        // DB me save karo (UI auto-update hoga)
                         messageDao.insertMessage(entity)
 
-                        // Server ko Delivery Receipt bhejo (agar message mere liye aaya hai)
+                        // Server ko Delivery Receipt bhejo (Double Tick)
                         if (!isMine && msg.messageId != null) {
                             ChatWebSocketClient.sendMessageReceived(msg.messageId, msg.senderCode ?: "")
                         }
                     }
+                }
+                
+                // 🔥 PART 2: TICK UPDATE (SENT -> DELIVERED -> READ)
+                if (response.type == "message-status-update" && response.payload?.messageId != null) {
+                    val msgId = response.payload.messageId
+                    val newStatus = response.payload.status ?: "delivered"
+                    
+                    // Database mein status update karo
+                    messageDao.updateMessageStatus(msgId, newStatus)
                 }
             }
         }
