@@ -34,18 +34,14 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import com.chatarena.ChatItem
+import com.chatarena.GlobalChatManager // 🔥 IMPORT ADD KIYA
 import com.chatarena.database.AppDatabase
-import com.chatarena.database.MessageEntity
 import com.chatarena.network.AIRequest
 import com.chatarena.network.RetrofitClient
 import com.chatarena.network.ChatWebSocketClient
 import com.chatarena.ui.auth.*
-import com.chatarena.utils.CryptoManager
 import com.chatarena.utils.TokenManager
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import java.util.UUID
 import kotlin.random.Random
 
 @Composable
@@ -58,25 +54,22 @@ fun MainAppScreen(onLogout: () -> Unit) {
     var showSettingsModal by remember { mutableStateOf(false) }
     var showCreateGroup by remember { mutableStateOf(false) }
     
-    // Active Chat state (ChatRoomScreen ke liye)
     var activeChat by remember { mutableStateOf<ChatItem?>(null) }
-    
     val currentUserCode = TokenManager.getUserCode(context) ?: ""
 
-    // 1. LOCAL DATABASE SETUP (Single Source of Truth)
+    // 1. DATABASE OBSERVE (Single Source of Truth)
     val db = remember { AppDatabase.getDatabase(context) }
     val messageDao = remember { db.messageDao() }
     val recentMessagesEntity by messageDao.getRecentChats().collectAsState(initial = emptyList())
 
-    // 2. SERVER METADATA (Names, Avatars, Unread counts ke liye cache)
+    // 2. SERVER METADATA (Names, Avatars)
     val serverMetadata = remember { mutableStateMapOf<String, ChatItem>() }
 
-    // 3. FINAL LIST (Database aur Server dono ko mila kar UI banega)
+    // 3. FINAL LIST MERGE
     val chatList = remember(recentMessagesEntity, serverMetadata.values.toList()) {
         val finalChatList = mutableListOf<ChatItem>()
         val dbChatIds = mutableSetOf<String>()
 
-        // Pehle Database se chats uthao 
         for (entity in recentMessagesEntity) {
             dbChatIds.add(entity.chatId)
             val metadata = serverMetadata[entity.chatId]
@@ -96,7 +89,6 @@ fun MainAppScreen(onLogout: () -> Unit) {
             )
         }
 
-        // Fir wo chats add karo jo abhi tak DB me save nahi hue hain
         for (metadata in serverMetadata.values) {
             if (!dbChatIds.contains(metadata.id)) {
                 var subtitle = metadata.subtitle
@@ -104,22 +96,17 @@ fun MainAppScreen(onLogout: () -> Unit) {
                 finalChatList.add(metadata.copy(subtitle = subtitle))
             }
         }
-
         finalChatList
     }
 
     LaunchedEffect(Unit) {
-        val token = TokenManager.getToken(context) ?: ""
-        
-        // Socket Connect karo
-        ChatWebSocketClient.connect(currentUserCode, token)
+        // 🔥 GLOBAL MANAGER INIT (Yeh background me sab kuch handle karega)
+        GlobalChatManager.init(context)
 
-        // App khulte hi Server se metadata fetch karo
-        // FIX: Added Explicit Type 'com.google.gson.JsonObject?' to 'response'
+        // Server se sirf Names/Avatars fetch karne ke liye ek baar call karo
         ChatWebSocketClient.getRecentChats { response: com.google.gson.JsonObject? ->
             if (response != null && response.has("success") && response.get("success").asBoolean) {
                 val chatsArray = response.getAsJsonArray("chats")
-                
                 if (chatsArray != null) {
                     for (i in 0 until chatsArray.size()) {
                         val element = chatsArray.get(i)
@@ -142,61 +129,7 @@ fun MainAppScreen(onLogout: () -> Unit) {
                 }
             }
         }
-
-        // Naye messages aane par observe karna
-        // FIX: Added Explicit Type 'com.chatarena.network.SocketResponse' to 'response'
-        ChatWebSocketClient.socketEvents.collect { response: com.chatarena.network.SocketResponse ->
-            val msg = response.payload?.message
-            if (msg != null) {
-                val isMine = msg.senderCode == currentUserCode || msg.mine
-                val otherUserCode = if (isMine) msg.receiverCode ?: "" else msg.senderCode ?: ""
-                val otherUserName = if (isMine) "User" else (msg.senderName ?: otherUserCode)
-                
-                if (otherUserCode.isNotEmpty()) {
-                    if (!isMine) {
-                        val existing = serverMetadata[otherUserCode]
-                        serverMetadata[otherUserCode] = ChatItem(
-                            type = "user",
-                            id = otherUserCode,
-                            name = existing?.name ?: otherUserName,
-                            avatarUrl = existing?.avatarUrl,
-                            subtitle = existing?.subtitle ?: "",
-                            unreadCount = (existing?.unreadCount ?: 0) + 1
-                        )
-                    }
-
-                    val senderPubKey = CryptoManager.getPublicKeyFromDisk(context, msg.senderCode ?: "")
-                    var decryptedText = msg.text
-                    
-                    if (msg.messageType == "text" && senderPubKey != null && msg.text.startsWith("E2E:")) {
-                        try {
-                            decryptedText = CryptoManager.decryptText(context, msg.text, msg.senderCode ?: "", senderPubKey)
-                        } catch (e: Exception) {
-                            decryptedText = "🔒 Encrypted Message"
-                        }
-                    }
-
-                    val entity = MessageEntity(
-                        messageId = msg.messageId ?: msg.clientMessageId ?: UUID.randomUUID().toString(),
-                        clientMessageId = msg.clientMessageId,
-                        chatId = otherUserCode,
-                        senderCode = msg.senderCode ?: "",
-                        receiverCode = msg.receiverCode,
-                        encryptedText = msg.text,
-                        decryptedText = decryptedText,
-                        messageType = msg.messageType ?: "text",
-                        status = msg.status ?: "sent",
-                        createdAt = msg.createdAt ?: System.currentTimeMillis(),
-                        replyTo = msg.replyTo,
-                        isDeleted = msg.isDeleted ?: false
-                    )
-
-                    scope.launch(Dispatchers.IO) {
-                        messageDao.insertMessage(entity)
-                    }
-                }
-            }
-        }
+        // ❌ YAHAN SE SOCKET EVENTS COLLECT WALA PURA BLOCK HATA DIYA GAYA HAI
     }
 
     Box(modifier = Modifier.fillMaxSize().background(BgColor)) {
@@ -224,7 +157,6 @@ fun MainAppScreen(onLogout: () -> Unit) {
                         selectedTabIndex = pagerState.currentPage,
                         containerColor = CardColor,
                         contentColor = PrimaryBlue,
-                        // FIX: Added Explicit Type to 'tabPositions'
                         indicator = { tabPositions: List<androidx.compose.material3.TabPosition> ->
                             TabRowDefaults.SecondaryIndicator(
                                 modifier = Modifier.tabIndicatorOffset(tabPositions[pagerState.currentPage]),
@@ -232,7 +164,6 @@ fun MainAppScreen(onLogout: () -> Unit) {
                             )
                         }
                     ) {
-                        // FIX: Added Explicit Types to 'index' and 'title'
                         listOf("CHATS", "REELS", "CALLS").forEachIndexed { index: Int, title: String ->
                             Tab(
                                 selected = pagerState.currentPage == index,
@@ -243,7 +174,6 @@ fun MainAppScreen(onLogout: () -> Unit) {
                     }
                 }
 
-                // FIX: Added Explicit Type 'Int' to 'page'
                 HorizontalPager(
                     state = pagerState, 
                     modifier = Modifier.weight(1f),
@@ -252,7 +182,6 @@ fun MainAppScreen(onLogout: () -> Unit) {
                     when (page) {
                         0 -> ChatListScreen(
                             chatList = chatList,
-                            // FIX: Added Explicit Type 'ChatItem' to 'clickedChat'
                             onItemClick = { clickedChat: ChatItem -> activeChat = clickedChat }
                         )
                         1 -> ReelsWebView(url = "https://reel-center-2.onrender.com")
@@ -430,12 +359,10 @@ fun AIModalScreen(onClose: () -> Unit) {
                 modifier = Modifier
                     .weight(1f)
                     .padding(horizontal = 16.dp)
-                    // FIX: Explicitly handled 'offset' parameter type for safety
                     .pointerInput(Unit) { detectTapGestures(onTap = { offset: androidx.compose.ui.geometry.Offset -> focusManager.clearFocus() }) },
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 contentPadding = PaddingValues(vertical = 16.dp)
             ) {
-                // FIX: Added Explicit Type 'AIMessage' to 'msg'
                 items(messages) { msg: AIMessage ->
                     Box(modifier = Modifier.fillMaxWidth(), contentAlignment = if (msg.isUser) Alignment.CenterEnd else Alignment.CenterStart) {
                         Surface(
