@@ -170,7 +170,6 @@ fun ChatRoomScreen(
     }
 
     LaunchedEffect(Unit) {
-        // Note: Socket connect() ab GlobalChatManager karta hai, isliye yahan nahi hai.
         val cachedKey = CryptoManager.getPublicKeyFromDisk(context, chatItem.id)
         
         if (cachedKey != null) {
@@ -234,7 +233,7 @@ fun ChatRoomScreen(
 
         // 1. Save locally as PENDING (Clock Icon)
         val localEntity = MessageEntity(
-            messageId = clientMsgId, // Temporarily using client ID as primary key
+            messageId = clientMsgId, 
             clientMessageId = clientMsgId,
             chatId = chatItem.id,
             senderCode = currentUserCode,
@@ -268,7 +267,6 @@ fun ChatRoomScreen(
             
             scope.launch(Dispatchers.IO) {
                 if (isSuccess && response!!.has("message")) {
-                    // 🔥 FIX: Server ka asli messageId aur time nikaal kar DB update karein
                     val msgObj = response.getAsJsonObject("message")
                     val serverId = msgObj.get("messageId").asString
                     val serverTime = msgObj.get("createdAt").asLong
@@ -276,7 +274,6 @@ fun ChatRoomScreen(
                     // DB me Client ID ko Server ID se replace karo aur status 'sent' karo
                     messageDao.updateMessageWithServerDetails(clientMsgId, serverId, serverTime)
                 } else {
-                    // Agar server fail ho jaye toh status 'failed' karo
                     messageDao.updateMessageStatusByClientId(clientMsgId, "failed")
                 }
             }
@@ -328,11 +325,11 @@ fun ChatRoomScreen(
                 }
             }
 
-            // Chat Messages List
+            // Chat Messages List (🔥 Spacing 8.dp se 2.dp ki gayi hai)
             LazyColumn(
                 state = listState,
                 modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp), 
                 contentPadding = PaddingValues(vertical = 16.dp)
             ) {
                 items(messages) { msg ->
