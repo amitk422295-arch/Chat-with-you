@@ -27,12 +27,14 @@ data class Message(
     @SerializedName("senderCode") val senderCode: String = "",
     @SerializedName("receiverCode") val receiverCode: String? = null,
     @SerializedName("senderName") val senderName: String? = null,
-    @SerializedName("mine") val mine: Boolean = false,
+    @SerializedName("mine") var mine: Boolean = false, // Isko var kiya taaki manual change kar sakein
     @SerializedName("createdAt") val createdAt: Long = System.currentTimeMillis(),
     @SerializedName("status") val status: String = "pending",
     @SerializedName("replyTo") val replyTo: String? = null,
     @SerializedName("reactions") val reactions: Map<String, String>? = null,
-    @SerializedName("isDeleted") val isDeleted: Boolean = false
+    
+    // 🔥 YAHAN FIX KIYA HAI (Boolean se Int kiya hai) 🔥
+    @SerializedName("isDeleted") val isDeleted: Int = 0 
 )
 
 // 4. WebSocket Event Wrapper
@@ -42,7 +44,7 @@ data class SocketEvent(
     @SerializedName("cbId") val cbId: Int? = null
 )
 
-// 5. Send Message Payload (targetCode add kiya, aur sender details bhi)
+// 5. Send Message Payload
 data class SendMessagePayload(
     @SerializedName("targetCode") val targetCode: String, 
     @SerializedName("text") val text: String,
