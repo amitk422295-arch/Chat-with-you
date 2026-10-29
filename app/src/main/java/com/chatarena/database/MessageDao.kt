@@ -9,24 +9,35 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface MessageDao {
 
-    // 1. Naya message save karne ke liye (Agar pehle se hai toh update kar dega)
+    // 1. Naya message save (REPLACE use karne se duplicate nahi honge)
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertMessage(message: MessageEntity)
 
-    // 2. Kisi specific chat ke saare messages load karne ke liye (Flow se auto-update hoga)
+    // 2. Chat ke saare messages load karne ke liye
     @Query("SELECT * FROM messages WHERE chatId = :chatId ORDER BY createdAt ASC")
     fun getMessagesForChat(chatId: String): Flow<List<MessageEntity>>
 
-    // 3. Message ka status update karne ke liye (Pending se Sent ya Failed karne ke liye)
+    // 3. Status update by MessageId (Server se aane wale updates ke liye)
     @Query("UPDATE messages SET status = :status WHERE messageId = :messageId")
     suspend fun updateMessageStatus(messageId: String, status: String)
 
-    // 4. Chat delete karne ke liye (Baad me kaam aayega)
+    // 🔥 NAYA FIX: Status update by ClientMessageId (Jab hum message bhejte hain aur callback aata hai)
+    @Query("UPDATE messages SET status = :status WHERE clientMessageId = :clientMessageId")
+    suspend fun updateMessageStatusByClientId(clientMessageId: String, status: String)
+
+    // 🔥 NAYA FIX: Server ka messageId aur exact timestamp update karne ke liye (Jab message Sent ho jaye)
+    @Query("UPDATE messages SET messageId = :newServerId, createdAt = :serverTime, status = 'sent' WHERE clientMessageId = :clientMessageId")
+    suspend fun updateMessageWithServerDetails(clientMessageId: String, newServerId: String, serverTime: Long)
+
+    // 🔥 NAYA FIX: Saare unread messages ko ek sath Read/Delivered mark karne ke liye
+    @Query("UPDATE messages SET status = :status WHERE chatId = :chatId AND status != :status")
+    suspend fun updateAllMessagesStatusInChat(chatId: String, status: String)
+
+    // Chat delete karne ke liye
     @Query("DELETE FROM messages WHERE chatId = :chatId")
     suspend fun clearChat(chatId: String)
 
-    // 5. NAYA: Home screen par Inbox (Recent Chats) dikhane ke liye
-    // Yeh query har chatId ka sabse aakhiri (latest timestamp wala) message fetch karegi
+    // Inbox (Recent Chats) ke liye
     @Query("""
         SELECT m1.* FROM messages m1 
         INNER JOIN (
