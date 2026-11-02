@@ -37,13 +37,10 @@ import javax.crypto.spec.SecretKeySpec
 object CryptoManager {
     private const val TAG = "CryptoManager"
     private const val E2E_PREFIX = "E2E:"
-    private const val MEDIA_CHUNK_SIZE = 5 * 1024 * 1024 // 5MB
+    private const val MEDIA_CHUNK_SIZE = 5 * 1024 * 1024
     private const val CLOUDINARY_CLOUD = "gr8tp1tg"
-    
-    // NAYA: Disk Cache ke liye SharedPreferences ka naam
     private const val PREF_KEYS_CACHE = "ChatArenaKeysCache"
 
-    // --- Caching (With Eviction just like JS) ---
     private val publicKeyCache = object : LruCache<String, String>(200) {}
     private val sharedKeyCache = object : LruCache<String, SecretKey>(200) {}
 
@@ -53,7 +50,6 @@ object CryptoManager {
         .writeTimeout(90, TimeUnit.SECONDS)
         .build()
 
-    // --- Base64 Helpers ---
     private fun uint8ToBase64(bytes: ByteArray): String = Base64.encodeToString(bytes, Base64.NO_WRAP)
     private fun base64ToUint8(b64: String): ByteArray = Base64.decode(b64, Base64.NO_WRAP)
 
@@ -65,9 +61,10 @@ object CryptoManager {
         val keyGen = KeyPairGenerator.getInstance("EC")
         keyGen.initialize(ECGenParameterSpec("secp256r1"), SecureRandom())
         val keyPair = keyGen.generateKeyPair()
-        val pubBase64 = uint8ToBase64(keyPair.public.encoded)
-        val privBase64 = uint8ToBase64(keyPair.private.encoded)
-        return Pair(pubBase64, privBase64)
+        return Pair(
+            uint8ToBase64(keyPair.public.encoded),
+            uint8ToBase64(keyPair.private.encoded)
+        )
     }
 
     fun ensureE2EKeys(context: Context): String {
@@ -79,7 +76,7 @@ object CryptoManager {
         var pubKey = prefs.getString("chatAppPublicKey", null)
 
         if (privKey != null && pubKey != null && owner != currentUserCode) {
-            privKey = null; pubKey = null // Invalidate old keys
+            privKey = null; pubKey = null
         }
 
         if (privKey == null || pubKey == null) {
@@ -102,58 +99,60 @@ object CryptoManager {
             .remove("chatAppPublicKey")
             .remove("chatAppKeysOwner")
             .apply()
+
+        // 🔥 FIX: RAM caches bhi clear karo, warna nayi keys ke saath purani shared keys use hongi
+        sharedKeyCache.evictAll()
+        publicKeyCache.evictAll()
+        Log.d(TAG, "E2E keys and caches cleared")
     }
 
     fun hasLocalKeys(context: Context): Boolean {
         val prefs = context.getSharedPreferences("ChatArenaPrefs", Context.MODE_PRIVATE)
-        return prefs.getString("chatAppPrivateKey", null) != null && prefs.getString("chatAppPublicKey", null) != null
+        return prefs.getString("chatAppPrivateKey", null) != null &&
+               prefs.getString("chatAppPublicKey", null) != null
     }
 
     // ==========================================
-    // 🚀 NAYA: DISK CACHE FOR PUBLIC KEYS (WhatsApp Jaisa Speed)
+    // 🚀 PUBLIC KEY DISK CACHE
     // ==========================================
 
     fun savePublicKeyToDisk(context: Context, targetCode: String, publicKey: String) {
-        // 1. RAM me save karo (LruCache)
+        // 🔥 FIX: Agar key badal gayi (uninstall/reinstall), to purani shared key cache se hatao
+        val oldKey = getPublicKeyFromDisk(context, targetCode)
+        if (oldKey != null && oldKey != publicKey) {
+            clearSharedKeyCacheForTarget(targetCode)
+            Log.d(TAG, "Public key changed for $targetCode — shared cache invalidated")
+        }
+
         publicKeyCache.put(targetCode, publicKey)
-        
-        // 2. Disk me save karo (SharedPreferences)
         val prefs = context.getSharedPreferences(PREF_KEYS_CACHE, Context.MODE_PRIVATE)
         prefs.edit().putString(targetCode, publicKey).apply()
-        Log.d(TAG, "Key saved to disk for: $targetCode")
     }
 
     fun getPublicKeyFromDisk(context: Context, targetCode: String): String? {
-        // 1. Pehle RAM me check karo (Fastest)
         publicKeyCache.get(targetCode)?.let { return it }
-        
-        // 2. Agar RAM me nahi hai, toh Disk se nikalo
         val prefs = context.getSharedPreferences(PREF_KEYS_CACHE, Context.MODE_PRIVATE)
         val diskKey = prefs.getString(targetCode, null)
-        
-        if (diskKey != null) {
-            // Disk se mila, ab RAM me bhi save kar do taaki agli baar 0ms lage
-            publicKeyCache.put(targetCode, diskKey)
-            return diskKey
+        if (diskKey != null) publicKeyCache.put(targetCode, diskKey)
+        return diskKey
+    }
+
+    private fun clearSharedKeyCacheForTarget(targetCode: String) {
+        val snapshot = sharedKeyCache.snapshot()
+        for (key in snapshot.keys) {
+            if (key.startsWith("$targetCode::")) sharedKeyCache.remove(key)
         }
-        return null
     }
 
     // ==========================================
-    // 🔒 KEY DERIVATION & CACHING
+    // 🔒 KEY DERIVATION — FIXED
     // ==========================================
 
-    private fun importPrivateKey(base64Key: String): PrivateKey {
-        val bytes = base64ToUint8(base64Key)
-        val spec = PKCS8EncodedKeySpec(bytes)
-        return KeyFactory.getInstance("EC").generatePrivate(spec)
-    }
+    private fun importPrivateKey(base64Key: String): PrivateKey =
+        KeyFactory.getInstance("EC").generatePrivate(PKCS8EncodedKeySpec(base64ToUint8(base64Key)))
 
-    private fun importPublicKey(base64Key: String): PublicKey {
-        val bytes = base64ToUint8(base64Key)
-        val spec = X509EncodedKeySpec(bytes)
-        return KeyFactory.getInstance("EC").generatePublic(spec)
-    }
+    private fun importPublicKey(base64Key: String): PublicKey =
+        KeyFactory.getInstance("EC").generatePublic(X509EncodedKeySpec(base64ToUint8(base64Key)))
 
     private fun getSharedKeyCacheKey(targetCode: String, myPrivKey: String, targetPubKey: String): String {
         val pubKeyHash = if (targetPubKey.length > 16) targetPubKey.takeLast(16) else "nopub"
@@ -161,42 +160,57 @@ object CryptoManager {
         return "${targetCode}::${privKeyHash}::${pubKeyHash}"
     }
 
-    private fun deriveSharedKey(myPrivKeyBase64: String, targetPubKeyBase64: String, cacheKeyStr: String): SecretKey {
-        sharedKeyCache.get(cacheKeyStr)?.let { return it }
-
+    // 🔥 FIX: RAW ECDH secret — JS WebCrypto ke saath match karta hai
+    private fun deriveSharedKeyRaw(myPrivKeyBase64: String, targetPubKeyBase64: String): SecretKey {
         val myPrivate = importPrivateKey(myPrivKeyBase64)
         val targetPublic = importPublicKey(targetPubKeyBase64)
-
         val keyAgreement = KeyAgreement.getInstance("ECDH")
         keyAgreement.init(myPrivate)
         keyAgreement.doPhase(targetPublic, true)
+        val sharedSecret = keyAgreement.generateSecret() // P-256 = 32 bytes
+        return SecretKeySpec(sharedSecret, "AES")
+    }
 
+    // 🔥 FIX: Purane messages ke liye — SHA-256 fallback (jo pehle bane the)
+    private fun deriveSharedKeyLegacy(myPrivKeyBase64: String, targetPubKeyBase64: String): SecretKey {
+        val myPrivate = importPrivateKey(myPrivKeyBase64)
+        val targetPublic = importPublicKey(targetPubKeyBase64)
+        val keyAgreement = KeyAgreement.getInstance("ECDH")
+        keyAgreement.init(myPrivate)
+        keyAgreement.doPhase(targetPublic, true)
         val sharedSecret = keyAgreement.generateSecret()
-        
-        // JS WebCrypto deriveKey defaults to SHA-256 if used for AES-GCM without explicit KDF
         val aesKeyBytes = MessageDigest.getInstance("SHA-256").digest(sharedSecret)
-        val secretKey = SecretKeySpec(aesKeyBytes, "AES")
-        
-        sharedKeyCache.put(cacheKeyStr, secretKey)
-        return secretKey
+        return SecretKeySpec(aesKeyBytes, "AES")
+    }
+
+    private fun getCachedSharedKey(cacheKey: String, useLegacy: Boolean, derive: () -> SecretKey): SecretKey {
+        val fullKey = if (useLegacy) "$cacheKey::legacy" else cacheKey
+        sharedKeyCache.get(fullKey)?.let { return it }
+        val key = derive()
+        sharedKeyCache.put(fullKey, key)
+        return key
     }
 
     // ==========================================
-    // 🔒 TEXT ENCRYPTION
+    // 🔒 TEXT ENCRYPTION — RAW key (JS-compatible)
     // ==========================================
 
     fun encryptText(context: Context, text: String, targetCode: String, targetPubKeyBase64: String): String {
         if (text.isEmpty() || targetCode.isEmpty()) return text
 
+        ensureE2EKeys(context) // 🔥 FIX: Auto-generate keys if missing (pehle throw ho raha tha)
+
         val prefs = context.getSharedPreferences("ChatArenaPrefs", Context.MODE_PRIVATE)
-        val myPrivKey = prefs.getString("chatAppPrivateKey", null) ?: throw Exception("My private key missing")
+        val myPrivKey = prefs.getString("chatAppPrivateKey", null)
+            ?: throw Exception("My private key missing even after ensure")
 
         val cacheKey = getSharedKeyCacheKey(targetCode, myPrivKey, targetPubKeyBase64)
-        val sharedKey = deriveSharedKey(myPrivKey, targetPubKeyBase64, cacheKey)
+        val sharedKey = getCachedSharedKey(cacheKey, false) {
+            deriveSharedKeyRaw(myPrivKey, targetPubKeyBase64)
+        }
 
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-        val iv = ByteArray(12)
-        SecureRandom().nextBytes(iv)
+        val iv = ByteArray(12); SecureRandom().nextBytes(iv)
         cipher.init(Cipher.ENCRYPT_MODE, sharedKey, GCMParameterSpec(128, iv))
 
         val ciphertext = cipher.doFinal(text.toByteArray(Charsets.UTF_8))
@@ -205,52 +219,71 @@ object CryptoManager {
 
     fun decryptText(context: Context, cipherText: String, targetCode: String, targetPubKeyBase64: String?): String {
         if (!cipherText.startsWith(E2E_PREFIX)) return cipherText
-        if (targetPubKeyBase64 == null) return "🔒 Message Unavailable"
+        if (targetPubKeyBase64 == null) {
+            Log.e(TAG, "Decrypt failed: targetPubKeyBase64 is null for $targetCode")
+            return "🔒 Message Unavailable"
+        }
 
         val prefs = context.getSharedPreferences("ChatArenaPrefs", Context.MODE_PRIVATE)
-        val myPrivKey = prefs.getString("chatAppPrivateKey", null) ?: return "🔒 Message Unavailable"
+        val myPrivKey = prefs.getString("chatAppPrivateKey", null)
+        if (myPrivKey == null) {
+            Log.e(TAG, "Decrypt failed: my private key is null")
+            return "🔒 Message Unavailable"
+        }
 
-        try {
-            val parts = cipherText.split(":")
-            if (parts.size != 3) return "🔒 Message Unavailable"
+        val parts = cipherText.split(":")
+        if (parts.size != 3) {
+            Log.e(TAG, "Decrypt failed: malformed cipher (parts=${parts.size})")
+            return "🔒 Message Unavailable"
+        }
 
+        return try {
             val iv = base64ToUint8(parts[1])
             val ciphertext = base64ToUint8(parts[2])
-
             val cacheKey = getSharedKeyCacheKey(targetCode, myPrivKey, targetPubKeyBase64)
-            val sharedKey = deriveSharedKey(myPrivKey, targetPubKeyBase64, cacheKey)
 
+            // 🔥 FIX 1: Pehle RAW key try karo (naya, cross-platform compatible)
+            try {
+                val sharedKey = getCachedSharedKey(cacheKey, false) {
+                    deriveSharedKeyRaw(myPrivKey, targetPubKeyBase64)
+                }
+                val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+                cipher.init(Cipher.DECRYPT_MODE, sharedKey, GCMParameterSpec(128, iv))
+                return String(cipher.doFinal(ciphertext), Charsets.UTF_8)
+            } catch (firstFail: Exception) {
+                Log.w(TAG, "Raw decrypt failed, trying legacy (SHA-256) fallback: ${firstFail.message}")
+            }
+
+            // 🔥 FIX 2: Fallback — purane SHA-256 wale messages ke liye
+            val legacyKey = getCachedSharedKey(cacheKey, true) {
+                deriveSharedKeyLegacy(myPrivKey, targetPubKeyBase64)
+            }
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-            cipher.init(Cipher.DECRYPT_MODE, sharedKey, GCMParameterSpec(128, iv))
-            
-            return String(cipher.doFinal(ciphertext), Charsets.UTF_8)
+            cipher.init(Cipher.DECRYPT_MODE, legacyKey, GCMParameterSpec(128, iv))
+            String(cipher.doFinal(ciphertext), Charsets.UTF_8)
         } catch (e: Exception) {
-            Log.e(TAG, "Decryption failed")
-            return "🔒 Message Unavailable"
+            Log.e(TAG, "Decrypt failed (both raw+legacy): ${e.javaClass.simpleName} — ${e.message}")
+            "🔒 Message Unavailable"
         }
     }
 
     // ==========================================
-    // 🖼️ THUMBNAIL GENERATOR
+    // 🖼️ THUMBNAIL (unchanged)
     // ==========================================
 
     fun generateThumbnail(file: File, mimeType: String): String? {
         val maxDim = 200
         var bitmap: Bitmap? = null
-
         try {
             if (mimeType.startsWith("image/")) {
                 val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                 BitmapFactory.decodeFile(file.absolutePath, options)
-                
                 val scale = minOf(maxDim.toFloat() / options.outWidth, maxDim.toFloat() / options.outHeight, 1f)
                 val reqWidth = (options.outWidth * scale).toInt().coerceAtLeast(1)
                 val reqHeight = (options.outHeight * scale).toInt().coerceAtLeast(1)
-
                 val decodeOptions = BitmapFactory.Options().apply { inSampleSize = calculateInSampleSize(options, reqWidth, reqHeight) }
                 val decoded = BitmapFactory.decodeFile(file.absolutePath, decodeOptions)
                 bitmap = Bitmap.createScaledBitmap(decoded, reqWidth, reqHeight, true)
-
             } else if (mimeType.startsWith("video/")) {
                 val retriever = MediaMetadataRetriever()
                 retriever.setDataSource(file.absolutePath)
@@ -261,16 +294,11 @@ object CryptoManager {
                 }
                 retriever.release()
             }
-        } catch (e: Exception) {
-            return null
-        }
-
+        } catch (e: Exception) { return null }
         if (bitmap == null) return null
-
         val outputStream = ByteArrayOutputStream()
         bitmap.compress(Bitmap.CompressFormat.JPEG, 60, outputStream)
-        val bmpBytes = outputStream.toByteArray()
-        return "data:image/jpeg;base64," + uint8ToBase64(bmpBytes)
+        return "data:image/jpeg;base64," + uint8ToBase64(outputStream.toByteArray())
     }
 
     private fun calculateInSampleSize(options: BitmapFactory.Options, reqWidth: Int, reqHeight: Int): Int {
@@ -287,7 +315,7 @@ object CryptoManager {
     }
 
     // ==========================================
-    // 🚀 CHUNKED MEDIA + CLOUDINARY
+    // 🚀 CHUNKED MEDIA (Cloudinary)
     // ==========================================
 
     private suspend fun getCloudinarySignature(token: String): JSONObject? = withContext(Dispatchers.IO) {
@@ -297,42 +325,29 @@ object CryptoManager {
                 .header("Authorization", "Bearer $token")
                 .build()
             val response = client.newCall(request).execute()
-            if (response.isSuccessful) {
-                return@withContext JSONObject(response.body?.string() ?: "{}")
-            }
-        } catch (e: Exception) { Log.e(TAG, "Sign fetch failed") }
-        return@withContext null
+            if (response.isSuccessful) JSONObject(response.body?.string() ?: "{}") else null
+        } catch (e: Exception) { Log.e(TAG, "Sign fetch failed"); null }
     }
 
     private suspend fun uploadChunkToCloudinary(blobBytes: ByteArray, signData: JSONObject): String? = withContext(Dispatchers.IO) {
         try {
-            val apiKey = signData.getString("api_key")
-            val timestamp = signData.getString("timestamp")
-            val signature = signData.getString("signature")
-            val uploadPreset = signData.getString("upload_preset")
-
             val requestBody = MultipartBody.Builder()
                 .setType(MultipartBody.FORM)
                 .addFormDataPart("file", "chunk.enc", blobBytes.toRequestBody("application/octet-stream".toMediaTypeOrNull()))
-                .addFormDataPart("api_key", apiKey)
-                .addFormDataPart("timestamp", timestamp)
-                .addFormDataPart("signature", signature)
-                .addFormDataPart("upload_preset", uploadPreset)
+                .addFormDataPart("api_key", signData.getString("api_key"))
+                .addFormDataPart("timestamp", signData.getString("timestamp"))
+                .addFormDataPart("signature", signData.getString("signature"))
+                .addFormDataPart("upload_preset", signData.getString("upload_preset"))
                 .build()
-
             val request = Request.Builder()
                 .url("https://api.cloudinary.com/v1_1/$CLOUDINARY_CLOUD/raw/upload")
-                .post(requestBody)
-                .build()
-
+                .post(requestBody).build()
             val response = client.newCall(request).execute()
             if (response.isSuccessful) {
-                val responseBody = response.body?.string() ?: ""
-                val json = JSONObject(responseBody)
-                if (json.has("secure_url")) return@withContext json.getString("secure_url")
-            }
-        } catch (e: Exception) { Log.e(TAG, "Cloudinary upload failed") }
-        return@withContext null
+                val json = JSONObject(response.body?.string() ?: "")
+                if (json.has("secure_url")) json.getString("secure_url") else null
+            } else null
+        } catch (e: Exception) { Log.e(TAG, "Cloudinary upload failed"); null }
     }
 
     data class MediaUploadResult(val urls: List<String>, val totalChunks: Int, val mime: String, val size: Long, val thumb: String?)
@@ -345,6 +360,7 @@ object CryptoManager {
         targetPubKeyBase64: String,
         onProgress: (Float) -> Unit
     ): MediaUploadResult? = withContext(Dispatchers.IO) {
+        ensureE2EKeys(context)
         val prefs = context.getSharedPreferences("ChatArenaPrefs", Context.MODE_PRIVATE)
         val myPrivKey = prefs.getString("chatAppPrivateKey", null) ?: return@withContext null
         val token = TokenManager.getToken(context) ?: return@withContext null
@@ -352,19 +368,19 @@ object CryptoManager {
         try {
             val signData = getCloudinarySignature(token) ?: return@withContext null
             val cacheKey = getSharedKeyCacheKey(targetCode, myPrivKey, targetPubKeyBase64)
-            val sharedKey = deriveSharedKey(myPrivKey, targetPubKeyBase64, cacheKey)
+            val sharedKey = getCachedSharedKey(cacheKey, false) {
+                deriveSharedKeyRaw(myPrivKey, targetPubKeyBase64) // 🔥 FIX: RAW key
+            }
 
-            // 1. Encrypt Thumbnail
             var encryptedThumb: String? = null
             generateThumbnail(file, mimeType)?.let { thumbBase64 ->
                 val cipher = Cipher.getInstance("AES/GCM/NoPadding")
                 val iv = ByteArray(12); SecureRandom().nextBytes(iv)
                 cipher.init(Cipher.ENCRYPT_MODE, sharedKey, GCMParameterSpec(128, iv))
-                val ciphertext = cipher.doFinal(thumbBase64.toByteArray(Charsets.UTF_8))
-                encryptedThumb = "$E2E_PREFIX${uint8ToBase64(iv)}:${uint8ToBase64(ciphertext)}"
+                val ct = cipher.doFinal(thumbBase64.toByteArray(Charsets.UTF_8))
+                encryptedThumb = "$E2E_PREFIX${uint8ToBase64(iv)}:${uint8ToBase64(ct)}"
             }
 
-            // 2. Encrypt & Upload Chunks
             val totalChunks = maxOf(1, ((file.length() + MEDIA_CHUNK_SIZE - 1) / MEDIA_CHUNK_SIZE).toInt())
             val urls = mutableListOf<String>()
 
@@ -372,34 +388,28 @@ object CryptoManager {
                 val start = i.toLong() * MEDIA_CHUNK_SIZE
                 val end = minOf(start + MEDIA_CHUNK_SIZE.toLong(), file.length())
                 val chunkBytes = ByteArray((end - start).toInt())
-                
-                file.inputStream().use { fis ->
-                    fis.skip(start)
-                    fis.read(chunkBytes)
-                }
+                file.inputStream().use { fis -> fis.skip(start); fis.read(chunkBytes) }
 
                 val aad = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt(i).array()
-
                 val cipher = Cipher.getInstance("AES/GCM/NoPadding")
                 val iv = ByteArray(12); SecureRandom().nextBytes(iv)
                 cipher.init(Cipher.ENCRYPT_MODE, sharedKey, GCMParameterSpec(128, iv))
                 cipher.updateAAD(aad)
-                
-                val ciphertext = cipher.doFinal(chunkBytes)
+                val ct = cipher.doFinal(chunkBytes)
 
-                val combined = ByteArray(iv.size + ciphertext.size)
+                val combined = ByteArray(iv.size + ct.size)
                 System.arraycopy(iv, 0, combined, 0, iv.size)
-                System.arraycopy(ciphertext, 0, combined, iv.size, ciphertext.size)
+                System.arraycopy(ct, 0, combined, iv.size, ct.size)
 
                 val url = uploadChunkToCloudinary(combined, signData) ?: return@withContext null
                 urls.add(url)
                 onProgress((i + 1).toFloat() / totalChunks)
             }
 
-            return@withContext MediaUploadResult(urls, totalChunks, mimeType, file.length(), encryptedThumb)
+            MediaUploadResult(urls, totalChunks, mimeType, file.length(), encryptedThumb)
         } catch (e: Exception) {
             Log.e(TAG, "Media upload failed: ${e.message}")
-            return@withContext null
+            null
         }
     }
 
@@ -414,42 +424,37 @@ object CryptoManager {
 
         try {
             val cacheKey = getSharedKeyCacheKey(targetCode, myPrivKey, targetPubKeyBase64)
-            val sharedKey = deriveSharedKey(myPrivKey, targetPubKeyBase64, cacheKey)
+            val sharedKey = getCachedSharedKey(cacheKey, false) {
+                deriveSharedKeyRaw(myPrivKey, targetPubKeyBase64) // 🔥 FIX: RAW key
+            }
 
             val outputStream = ByteArrayOutputStream()
-
             for (i in urls.indices) {
-                val request = Request.Builder().url(urls[i]).build()
-                val response = client.newCall(request).execute()
+                val response = client.newCall(Request.Builder().url(urls[i]).build()).execute()
                 if (!response.isSuccessful) throw Exception("Chunk download failed")
-
                 val combined = response.body?.bytes() ?: throw Exception("Empty body")
                 if (combined.size <= 12) throw Exception("Invalid chunk")
 
                 val iv = combined.copyOfRange(0, 12)
                 val ciphertext = combined.copyOfRange(12, combined.size)
-
                 val aad = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt(i).array()
 
-                val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-                cipher.init(Cipher.DECRYPT_MODE, sharedKey, GCMParameterSpec(128, iv))
-                
                 val plain = try {
+                    val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+                    cipher.init(Cipher.DECRYPT_MODE, sharedKey, GCMParameterSpec(128, iv))
                     cipher.updateAAD(aad)
                     cipher.doFinal(ciphertext)
                 } catch (e: Exception) {
-                    val cipherFallback = Cipher.getInstance("AES/GCM/NoPadding")
-                    cipherFallback.init(Cipher.DECRYPT_MODE, sharedKey, GCMParameterSpec(128, iv))
-                    cipherFallback.doFinal(ciphertext)
+                    val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+                    cipher.init(Cipher.DECRYPT_MODE, sharedKey, GCMParameterSpec(128, iv))
+                    cipher.doFinal(ciphertext)
                 }
-                
                 outputStream.write(plain)
             }
-
-            return@withContext outputStream.toByteArray()
+            outputStream.toByteArray()
         } catch (e: Exception) {
-            Log.e(TAG, "Media download failed")
-            return@withContext null
+            Log.e(TAG, "Media download failed: ${e.message}")
+            null
         }
     }
 }
