@@ -124,7 +124,6 @@ fun ChatRoomScreen(
                                 
                                 val decryptedText = if (msg.messageType == "text" && msg.text.startsWith("E2E:")) {
                                     try {
-                                        // 🔥 FIX: Hamesha chatItem.id use karo target code ke liye
                                         val keyToUse = pubKey ?: CryptoManager.getPublicKeyFromDisk(context, chatItem.id)
                                         if (keyToUse != null) {
                                             CryptoManager.decryptText(context, msg.text, chatItem.id, keyToUse)
@@ -169,7 +168,6 @@ fun ChatRoomScreen(
         }
     }
 
-    // 🔥 MAIN FIX: Socket connect hone ka wait mat karo, turant key fetch karo (Queue handle karega)
     LaunchedEffect(Unit) {
         val cachedKey = CryptoManager.getPublicKeyFromDisk(context, chatItem.id)
         
@@ -179,7 +177,6 @@ fun ChatRoomScreen(
             isKeyLoading = false
             fetchMessageHistory(cachedKey)
         } else {
-            // Turant fetch karo, socket background me connect hote rahega
             fetchPublicKey {
                 if (targetPublicKey != null) {
                     fetchMessageHistory(targetPublicKey)
@@ -188,59 +185,34 @@ fun ChatRoomScreen(
         }
     }
 
-    fun sendMessage() {
-        if (messageText.isBlank()) return
-        
-        if (isKeyLoading) {
-            Toast.makeText(context, "Securing chat, please wait...", Toast.LENGTH_SHORT).show()
-            return
-        }
-
-        if (!isKeyLoaded || targetPublicKey == null) {
-            Toast.makeText(context, "Fetching key, retrying...", Toast.LENGTH_SHORT).show()
-            fetchPublicKey {
-                if (targetPublicKey != null) {
-                    sendMessage() // 🔥 Auto retry
-                }
-            }
-            return
-        }
-
-        val clientMsgId = UUID.randomUUID().toString()
-        val plainText = messageText.trim()
-
+    // 🔥 यह फंक्शन सिर्फ एन्क्रिप्ट और सेंड करेगा
+    fun encryptAndSend(clientMsgId: String, plainText: String, pubKey: String) {
         val encryptedText = try {
-            CryptoManager.encryptText(
-                context = context,
-                text = plainText,
-                targetCode = chatItem.id, 
-                targetPubKeyBase64 = targetPublicKey!!
-            )
+            CryptoManager.encryptText(context, plainText, chatItem.id, pubKey)
         } catch (e: Exception) {
             Toast.makeText(context, "Encryption Failed!", Toast.LENGTH_SHORT).show()
+            scope.launch(Dispatchers.IO) { messageDao.updateMessageStatusByClientId(clientMsgId, "failed") }
             return
         }
 
         val finalEncryptedText = if (encryptedText.startsWith("E2E:")) encryptedText else "E2E:$encryptedText"
 
-        val localEntity = MessageEntity(
-            messageId = clientMsgId, 
-            clientMessageId = clientMsgId,
-            chatId = chatItem.id,
-            senderCode = currentUserCode,
-            receiverCode = chatItem.id,
-            encryptedText = finalEncryptedText,
-            decryptedText = plainText, 
-            status = "pending",
-            createdAt = System.currentTimeMillis(),
-            isDeleted = 0
-        )
-        
+        // DB में एन्क्रिप्टेड टेक्स्ट अपडेट करो
         scope.launch(Dispatchers.IO) {
-            messageDao.insertMessage(localEntity)
+            val entity = MessageEntity(
+                messageId = clientMsgId, 
+                clientMessageId = clientMsgId,
+                chatId = chatItem.id,
+                senderCode = currentUserCode,
+                receiverCode = chatItem.id,
+                encryptedText = finalEncryptedText,
+                decryptedText = plainText, 
+                status = "pending",
+                createdAt = System.currentTimeMillis(),
+                isDeleted = 0
+            )
+            messageDao.insertMessage(entity)
         }
-        
-        messageText = ""
 
         val payload = SendMessagePayload(
             targetCode = chatItem.id, 
@@ -263,6 +235,47 @@ fun ChatRoomScreen(
                     messageDao.updateMessageWithServerDetails(clientMsgId, serverId, serverTime)
                 } else {
                     messageDao.updateMessageStatusByClientId(clientMsgId, "failed")
+                }
+            }
+        }
+    }
+
+    // 🔥 यह WhatsApp वाला फंक्शन है (तुरंत स्क्रीन पर दिखाएगा)
+    fun sendMessage() {
+        if (messageText.isBlank()) return
+
+        val plainText = messageText.trim()
+        val clientMsgId = UUID.randomUUID().toString()
+
+        // 1. तुरंत स्क्रीन पर दिखाओ (Pending status के साथ)
+        val localEntity = MessageEntity(
+            messageId = clientMsgId, 
+            clientMessageId = clientMsgId,
+            chatId = chatItem.id,
+            senderCode = currentUserCode,
+            receiverCode = chatItem.id,
+            encryptedText = "", // अभी खाली है
+            decryptedText = plainText, 
+            status = "pending",
+            createdAt = System.currentTimeMillis(),
+            isDeleted = 0
+        )
+        
+        scope.launch(Dispatchers.IO) {
+            messageDao.insertMessage(localEntity)
+        }
+        
+        messageText = ""
+
+        // 2. चेक करो की है या नहीं, और बैकग्राउंड में एन्क्रिप्ट करके भेजो
+        if (isKeyLoaded && targetPublicKey != null) {
+            encryptAndSend(clientMsgId, plainText, targetPublicKey!!)
+        } else {
+            fetchPublicKey {
+                if (targetPublicKey != null) {
+                    encryptAndSend(clientMsgId, plainText, targetPublicKey!!)
+                } else {
+                    scope.launch(Dispatchers.IO) { messageDao.updateMessageStatusByClientId(clientMsgId, "failed") }
                 }
             }
         }
@@ -336,20 +349,7 @@ fun ChatRoomScreen(
                 }
             }
 
-            // 🔥 UI FIX: Loading indicator text upar dikhao
-            if (isKeyLoading) {
-                Box(
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp), 
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "🔒 Establishing secure connection...", 
-                        color = PrimaryBlue, 
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
+            // ❌ "Establishing secure connection..." वाला टेक्स्ट हटा दिया है ताकि UI ब्लॉक न लगे
 
             // Bottom Input Area
             Row(
@@ -383,22 +383,12 @@ fun ChatRoomScreen(
 
                 Spacer(modifier = Modifier.width(8.dp))
 
+                // 🔥 स्पिनर हटा दिया है, बटन हमेशा एक्टिव (Blue) रहेगा
                 IconButton(
                     onClick = { sendMessage() },
-                    modifier = Modifier.background(
-                        if (isKeyLoaded) PrimaryBlue else Color.Gray,
-                        CircleShape
-                    )
+                    modifier = Modifier.background(PrimaryBlue, CircleShape)
                 ) {
-                    if (isKeyLoading) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(20.dp),
-                            color = Color.White,
-                            strokeWidth = 2.dp
-                        )
-                    } else {
-                        Icon(Icons.Default.Send, contentDescription = "Send", tint = Color.White)
-                    }
+                    Icon(Icons.Default.Send, contentDescription = "Send", tint = Color.White)
                 }
             }
         }
