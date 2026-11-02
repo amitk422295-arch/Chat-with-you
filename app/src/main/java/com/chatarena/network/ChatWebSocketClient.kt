@@ -24,12 +24,13 @@ object ChatWebSocketClient {
     private val gson = Gson()
     private val client = OkHttpClient.Builder()
         .readTimeout(0, TimeUnit.MILLISECONDS)
+        .pingInterval(15, TimeUnit.SECONDS) // 🔥 FIX: हर 15 सेकंड में सर्वर को जिंदा रखने के लिए पिंग भेजेगा
         .build()
 
     private var webSocket: WebSocket? = null
     private var heartbeatJob: Job? = null
     private var reconnectJob: Job? = null
-    private var isConnected = false // 🔥 FIX: कनेक्शन स्टेटस ट्रैक करने के लिए
+    private var isConnected = false 
 
     private val _connectionState = MutableStateFlow(false)
     val connectionState: StateFlow<Boolean> = _connectionState
@@ -45,7 +46,6 @@ object ChatWebSocketClient {
     private val cbIdCounter = AtomicInteger(1)
     private val callbacks = ConcurrentHashMap<Int, CallbackData>()
 
-    // 🔥 FIX: जब तक कनेक्शन नहीं जुड़ता, मैसेज इसमें सेव रहेंगे
     private data class PendingEvent(
         val json: String,
         val cbId: Int? = null,
@@ -78,7 +78,7 @@ object ChatWebSocketClient {
                 _connectionState.value = true
                 startHeartbeat()
 
-                // 🔥 FIX: कनेक्शन जुड़ते ही पेंडिंग मैसेजेस भेज दो और टाइमर चालू करो
+                // 🔥 कनेक्शन जुड़ते ही पेंडिंग मैसेजेस भेज दो
                 while (pendingEvents.isNotEmpty()) {
                     val pending = pendingEvents.poll() ?: break
                     Log.d(TAG, "Flushing queued message...")
@@ -163,7 +163,7 @@ object ChatWebSocketClient {
         webSocket = null
         isConnected = false
         _connectionState.value = false
-        pendingEvents.clear() // 🔥 क्यू साफ करो
+        pendingEvents.clear()
 
         callbacks.forEach { (_, data) -> data.timeoutJob.cancel() }
         callbacks.clear()
@@ -179,7 +179,6 @@ object ChatWebSocketClient {
         }
     }
 
-    // 🔥 मुख्य फंक्शन: यह चेक करेगा कि कनेक्शन है या नहीं
     private fun sendEvent(event: Any, cbId: Int? = null, onResult: ((JsonObject?) -> Unit)? = null) {
         val json = gson.toJson(event)
         if (isConnected && webSocket != null) {
