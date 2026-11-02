@@ -124,9 +124,10 @@ fun ChatRoomScreen(
                                 
                                 val decryptedText = if (msg.messageType == "text" && msg.text.startsWith("E2E:")) {
                                     try {
-                                        val keyToUse = pubKey ?: CryptoManager.getPublicKeyFromDisk(context, msg.senderCode ?: "")
+                                        // 🔥 FIX: Hamesha chatItem.id use karo target code ke liye
+                                        val keyToUse = pubKey ?: CryptoManager.getPublicKeyFromDisk(context, chatItem.id)
                                         if (keyToUse != null) {
-                                            CryptoManager.decryptText(context, msg.text, msg.senderCode ?: "", keyToUse)
+                                            CryptoManager.decryptText(context, msg.text, chatItem.id, keyToUse)
                                         } else {
                                             "🔒 Key Missing"
                                         }
@@ -154,7 +155,6 @@ fun ChatRoomScreen(
                                 
                                 messageDao.insertMessage(entity)
 
-                                // Agar dusre ka message hai, toh Delivered aur Read mark karo
                                 if (msg.senderCode != currentUserCode && msg.messageId != null) {
                                     ChatWebSocketClient.sendMessageReceived(msg.messageId, msg.senderCode)
                                     ChatWebSocketClient.markMessageRead(msg.messageId, msg.senderCode)
@@ -169,6 +169,7 @@ fun ChatRoomScreen(
         }
     }
 
+    // 🔥 MAIN FIX: Socket connect hone ka wait mat karo, turant key fetch karo (Queue handle karega)
     LaunchedEffect(Unit) {
         val cachedKey = CryptoManager.getPublicKeyFromDisk(context, chatItem.id)
         
@@ -176,24 +177,12 @@ fun ChatRoomScreen(
             targetPublicKey = cachedKey
             isKeyLoaded = true
             isKeyLoading = false
-            
-            scope.launch {
-                ChatWebSocketClient.connectionState.collect { isConnected ->
-                    if (isConnected) {
-                        fetchMessageHistory(cachedKey)
-                    }
-                }
-            }
+            fetchMessageHistory(cachedKey)
         } else {
-            scope.launch {
-                ChatWebSocketClient.connectionState.collect { isConnected ->
-                    if (isConnected && targetPublicKey == null && isKeyLoading) {
-                        fetchPublicKey {
-                            if (targetPublicKey != null) {
-                                fetchMessageHistory(targetPublicKey)
-                            }
-                        }
-                    }
+            // Turant fetch karo, socket background me connect hote rahega
+            fetchPublicKey {
+                if (targetPublicKey != null) {
+                    fetchMessageHistory(targetPublicKey)
                 }
             }
         }
@@ -203,13 +192,17 @@ fun ChatRoomScreen(
         if (messageText.isBlank()) return
         
         if (isKeyLoading) {
-            Toast.makeText(context, "Fetching encryption keys, please wait...", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "Securing chat, please wait...", Toast.LENGTH_SHORT).show()
             return
         }
 
         if (!isKeyLoaded || targetPublicKey == null) {
-            Toast.makeText(context, "Key not found. Retrying...", Toast.LENGTH_SHORT).show()
-            fetchPublicKey {}
+            Toast.makeText(context, "Fetching key, retrying...", Toast.LENGTH_SHORT).show()
+            fetchPublicKey {
+                if (targetPublicKey != null) {
+                    sendMessage() // 🔥 Auto retry
+                }
+            }
             return
         }
 
@@ -228,10 +221,8 @@ fun ChatRoomScreen(
             return
         }
 
-        // Backend requires 'E2E:' prefix
         val finalEncryptedText = if (encryptedText.startsWith("E2E:")) encryptedText else "E2E:$encryptedText"
 
-        // 1. Save locally as PENDING (Clock Icon)
         val localEntity = MessageEntity(
             messageId = clientMsgId, 
             clientMessageId = clientMsgId,
@@ -251,7 +242,6 @@ fun ChatRoomScreen(
         
         messageText = ""
 
-        // 2. Send to Server
         val payload = SendMessagePayload(
             targetCode = chatItem.id, 
             text = finalEncryptedText,
@@ -270,8 +260,6 @@ fun ChatRoomScreen(
                     val msgObj = response.getAsJsonObject("message")
                     val serverId = msgObj.get("messageId").asString
                     val serverTime = msgObj.get("createdAt").asLong
-                    
-                    // DB me Client ID ko Server ID se replace karo aur status 'sent' karo
                     messageDao.updateMessageWithServerDetails(clientMsgId, serverId, serverTime)
                 } else {
                     messageDao.updateMessageStatusByClientId(clientMsgId, "failed")
@@ -325,7 +313,7 @@ fun ChatRoomScreen(
                 }
             }
 
-            // Chat Messages List (🔥 Spacing 8.dp se 2.dp ki gayi hai)
+            // Chat Messages List
             LazyColumn(
                 state = listState,
                 modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
@@ -344,6 +332,21 @@ fun ChatRoomScreen(
                         onToggleSelection = {},
                         onJumpToReply = {},
                         onMediaTap = {}
+                    )
+                }
+            }
+
+            // 🔥 UI FIX: Loading indicator text upar dikhao
+            if (isKeyLoading) {
+                Box(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp), 
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "🔒 Establishing secure connection...", 
+                        color = PrimaryBlue, 
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
                     )
                 }
             }
