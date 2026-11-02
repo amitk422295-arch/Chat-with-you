@@ -35,6 +35,7 @@ import kotlinx.coroutines.launch
 
 private const val TAG = "AuthScreen"
 
+// Colors
 val BgColor = Color(0xFFDDE3ED)
 val CardColor = Color(0xFFE0E5EC)
 val TextColor = Color(0xFF2D3748)
@@ -53,7 +54,9 @@ fun AuthScreen(onLoginSuccess: () -> Unit = {}) {
     var showOtpBox by remember { mutableStateOf(false) }
     var isLoading by remember { mutableStateOf(false) }
     var buttonText by remember { mutableStateOf("Send OTP") }
+
     var errorMessage by remember { mutableStateOf("") }
+
     var isProfileSetup by remember { mutableStateOf(false) }
     var setupName by remember { mutableStateOf("") }
     var setupMobile by remember { mutableStateOf("") }
@@ -65,10 +68,13 @@ fun AuthScreen(onLoginSuccess: () -> Unit = {}) {
         if (clean.isEmpty() || !Regex("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$").matches(clean)) {
             errorMessage = "Please enter a valid Email ID"; return
         }
+        
         isLoading = true; buttonText = "Sending... ⏳"; errorMessage = ""
+        
         scope.launch {
             try {
                 val response = RetrofitClient.apiService.sendOtp(OTPRequest(clean))
+                
                 if (response.isSuccessful && response.body()?.success == true) {
                     showOtpBox = true
                     buttonText = "Resend OTP"
@@ -91,12 +97,15 @@ fun AuthScreen(onLoginSuccess: () -> Unit = {}) {
         if (cleanOtp.length != 6 || !Regex("^\\d{6}$").matches(cleanOtp)) {
             errorMessage = "Please enter the 6-digit code"; return
         }
+        
         isLoading = true; errorMessage = ""
+        
         scope.launch {
             try {
                 val response = RetrofitClient.apiService.verifyOtp(
                     VerifyRequest(email = email.trim().lowercase(), code = cleanOtp)
                 )
+                
                 if (response.isSuccessful && response.body()?.success == true) {
                     val body = response.body()
                     val token = body?.chatToken
@@ -112,16 +121,15 @@ fun AuthScreen(onLoginSuccess: () -> Unit = {}) {
                             fullName = user.fullName
                         )
 
-                        // 2. Local E2E key ensure karo
+                        // 2. E2E Keys Generate karo
                         val myPublicKey = CryptoManager.ensureE2EKeys(context)
                         val serverPublicKey = user.publicKey ?: ""
 
-                        // 3. Purana user vs Naya user
+                        // 3. Purana user hai ya Naya
                         if (!user.mobile.isNullOrEmpty()) {
                             // ========== PURANA USER ==========
-                            // 🔥 FIX: response CHECK karo, silent fail band karo
                             if (serverPublicKey.isEmpty() || serverPublicKey != myPublicKey) {
-                                val uploadOk = try {
+                                try {
                                     val updateResp = RetrofitClient.apiService.updateProfile(
                                         token = "Bearer $token",
                                         request = UpdateProfileRequest(
@@ -132,22 +140,15 @@ fun AuthScreen(onLoginSuccess: () -> Unit = {}) {
                                     )
                                     val ok = updateResp.isSuccessful && updateResp.body()?.success == true
                                     if (!ok) {
-                                        Log.e(TAG, "Key upload failed: HTTP ${updateResp.code()} - ${updateResp.body()?.error}")
+                                        Log.e(TAG, "Key upload failed: HTTP ${updateResp.code()}")
+                                    } else {
+                                        Log.d(TAG, "Public key synced with server ✅")
                                     }
-                                    ok
                                 } catch (e: Exception) {
                                     Log.e(TAG, "Key upload exception: ${e.message}")
-                                    false
-                                }
-
-                                if (uploadOk) {
-                                    Log.d(TAG, "Public key synced with server ✅")
-                                } else {
-                                    Log.w(TAG, "⚠️ Key upload FAILED — user may see 🔒 on other devices until next retry")
-                                    toast("⚠️ Encryption setup issue. Messages may not decrypt.")
                                 }
                             }
-
+                            
                             toast("Welcome back!")
                             onLoginSuccess()
                         } else {
@@ -174,8 +175,9 @@ fun AuthScreen(onLoginSuccess: () -> Unit = {}) {
         val cleanDigits = setupMobile.replace(Regex("\\D"), "")
         if (cleanName.isEmpty()) { errorMessage = "Please enter your Full Name"; return }
         if (cleanDigits.length != 10) { errorMessage = "Please enter a valid 10-digit mobile number"; return }
-
+        
         isLoading = true; errorMessage = ""
+        
         scope.launch {
             try {
                 val savedToken = TokenManager.getToken(context) ?: ""
@@ -184,15 +186,16 @@ fun AuthScreen(onLoginSuccess: () -> Unit = {}) {
                 val response = RetrofitClient.apiService.updateProfile(
                     token = "Bearer $savedToken",
                     request = UpdateProfileRequest(
-                        fullName = cleanName,
+                        fullName = cleanName, 
                         mobile = cleanDigits,
                         publicKey = myPublicKey
                     )
                 )
-
+                
                 if (response.isSuccessful && response.body()?.success == true) {
                     val userCode = TokenManager.getUserCode(context) ?: ""
                     val userEmail = TokenManager.getEmail(context) ?: ""
+                    
                     TokenManager.saveUserData(
                         context = context,
                         token = savedToken,
@@ -200,11 +203,12 @@ fun AuthScreen(onLoginSuccess: () -> Unit = {}) {
                         email = userEmail,
                         fullName = cleanName
                     )
+                    
                     isProfileSetup = false
                     toast("Profile saved successfully!")
                     onLoginSuccess()
                 } else {
-                    errorMessage = response.body()?.error ?: "Failed to update profile (HTTP ${response.code()})"
+                    errorMessage = response.body()?.error ?: "Failed to update profile"
                 }
             } catch (e: Exception) {
                 errorMessage = "Network Error: ${e.message}"
@@ -220,7 +224,9 @@ fun AuthScreen(onLoginSuccess: () -> Unit = {}) {
             .background(BgColor)
             .windowInsetsPadding(WindowInsets.safeDrawing)
             .pointerInput(Unit) {
-                detectTapGestures(onTap = { focusManager.clearFocus() })
+                detectTapGestures(onTap = {
+                    focusManager.clearFocus()
+                })
             },
         contentAlignment = Alignment.Center
     ) {
@@ -254,9 +260,15 @@ fun AuthScreen(onLoginSuccess: () -> Unit = {}) {
                 )
             } else {
                 ProfileSetupModal(
-                    setupName = setupName, onNameChange = { setupName = it },
+                    setupName = setupName, 
+                    onNameChange = { nameInput -> setupName = nameInput },
                     setupMobile = setupMobile,
-                    onMobileChange = { input -> if (input.length <= 10) setupMobile = input.filter { it.isDigit() } },
+                    // 🔥 YAHAN FIX KIYA HAI: `it` ki jagah `char` use kiya hai
+                    onMobileChange = { mobileInput -> 
+                        if (mobileInput.length <= 10) {
+                            setupMobile = mobileInput.filter { char -> char.isDigit() }
+                        }
+                    },
                     isLoading = isLoading,
                     onSave = { submitProfileSetup() }
                 )
@@ -265,4 +277,173 @@ fun AuthScreen(onLoginSuccess: () -> Unit = {}) {
     }
 }
 
-// ... baaki LoginCard, ProfileSetupModal, TopBar, NeumorphicInput, NeumorphicButton — jo the waise hi rakho
+@Composable
+fun LoginCard(
+    email: String, onEmailChange: (String) -> Unit,
+    otp: String, onOtpChange: (String) -> Unit,
+    showOtpBox: Boolean, isLoading: Boolean, buttonText: String,
+    onSendOTP: () -> Unit, onValidateOTP: () -> Unit, onChangeEmail: () -> Unit
+) {
+    Surface(
+        modifier = Modifier.width(340.dp),
+        shape = RoundedCornerShape(24.dp),
+        color = CardColor, shadowElevation = 12.dp
+    ) {
+        Column(
+            modifier = Modifier.padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            TopBar()
+            Spacer(modifier = Modifier.height(24.dp))
+            Text("🔐", fontSize = 46.sp)
+            Spacer(modifier = Modifier.height(8.dp))
+            Text("Welcome to ChatArena", color = TextColor,
+                fontWeight = FontWeight.ExtraBold, fontSize = 22.sp,
+                letterSpacing = (-0.5).sp)
+            Spacer(modifier = Modifier.height(4.dp))
+            Text("Sign In via OTP", color = SubTextColor,
+                fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(modifier = Modifier.height(24.dp))
+
+            NeumorphicInput(
+                value = email, onValueChange = onEmailChange,
+                placeholder = "Email ID",
+                enabled = !showOtpBox && !isLoading,
+                keyboardType = KeyboardType.Email
+            )
+
+            if (!showOtpBox) {
+                Spacer(modifier = Modifier.height(16.dp))
+                NeumorphicButton(text = buttonText, onClick = onSendOTP, enabled = !isLoading)
+            } else {
+                Spacer(modifier = Modifier.height(16.dp))
+                NeumorphicInput(
+                    value = otp, onValueChange = onOtpChange,
+                    placeholder = "6-digit OTP", enabled = !isLoading, isNumber = true
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                NeumorphicButton(
+                    text = if (isLoading) "Verifying..." else "Validate",
+                    onClick = onValidateOTP, enabled = !isLoading
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    "Change Email", color = DangerRed,
+                    fontSize = 14.sp, fontWeight = FontWeight.Bold,
+                    modifier = Modifier.clickable(enabled = !isLoading) { onChangeEmail() }.padding(8.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun ProfileSetupModal(
+    setupName: String, onNameChange: (String) -> Unit,
+    setupMobile: String, onMobileChange: (String) -> Unit,
+    isLoading: Boolean, onSave: () -> Unit
+) {
+    Surface(
+        modifier = Modifier.width(320.dp),
+        shape = RoundedCornerShape(24.dp),
+        color = CardColor, shadowElevation = 12.dp
+    ) {
+        Column(
+            modifier = Modifier.padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text("Help your friends find you! 🌟", color = TextColor,
+                fontWeight = FontWeight.Bold, fontSize = 18.sp)
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                "Add your mobile number so people you know can easily search and connect with you on ChatArena.",
+                color = SubTextColor, fontSize = 13.sp,
+                textAlign = TextAlign.Center, fontWeight = FontWeight.Medium,
+                lineHeight = 20.sp
+            )
+            Spacer(modifier = Modifier.height(20.dp))
+            Column(modifier = Modifier.fillMaxWidth()) {
+                NeumorphicInput(
+                    value = setupName, onValueChange = onNameChange,
+                    placeholder = "Full Name", enabled = !isLoading
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                NeumorphicInput(
+                    value = setupMobile, onValueChange = onMobileChange,
+                    placeholder = "10-digit Mobile Number",
+                    enabled = !isLoading, isNumber = true
+                )
+            }
+            Spacer(modifier = Modifier.height(20.dp))
+            NeumorphicButton(
+                text = if (isLoading) "Saving..." else "Save & Continue",
+                onClick = onSave, enabled = !isLoading
+            )
+        }
+    }
+}
+
+@Composable
+fun TopBar() {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier.size(44.dp).background(BgColor, RoundedCornerShape(10.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text("CA", fontWeight = FontWeight.Bold, color = PrimaryBlue, fontSize = 18.sp)
+        }
+        Surface(shape = RoundedCornerShape(8.dp), color = BgColor, shadowElevation = 4.dp) {
+            Text("ℹ Help",
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                fontSize = 12.sp, fontWeight = FontWeight.Bold, color = PrimaryBlue)
+        }
+    }
+}
+
+@Composable
+fun NeumorphicInput(
+    value: String, onValueChange: (String) -> Unit, placeholder: String,
+    isNumber: Boolean = false, enabled: Boolean = true,
+    keyboardType: KeyboardType = if (isNumber) KeyboardType.Number else KeyboardType.Text
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        color = BgColor, shadowElevation = 6.dp
+    ) {
+        BasicTextField(
+            value = value, onValueChange = onValueChange, enabled = enabled,
+            textStyle = TextStyle(color = TextColor, fontSize = 15.sp, fontWeight = FontWeight.Medium),
+            modifier = Modifier.padding(16.dp),
+            keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
+            decorationBox = { innerTextField ->
+                if (value.isEmpty()) Text(placeholder, color = SubTextColor, fontSize = 15.sp)
+                innerTextField()
+            }
+        )
+    }
+}
+
+@Composable
+fun NeumorphicButton(
+    text: String, onClick: () -> Unit,
+    enabled: Boolean = true, color: Color = PrimaryBlue
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        color = if (enabled) color else color.copy(alpha = 0.5f),
+        shadowElevation = 8.dp,
+        onClick = { if (enabled) onClick() }
+    ) {
+        Text(
+            text = text, modifier = Modifier.padding(vertical = 14.dp),
+            textAlign = TextAlign.Center, color = Color.White,
+            fontSize = 16.sp, fontWeight = FontWeight.Bold
+        )
+    }
+}
