@@ -18,7 +18,7 @@ object ChatWebSocketClient {
 
     private const val BASE_WS_URL = "wss://chatarena-chat.onrender.com/ws"
     private const val TAG = "ChatSocket"
-    private const val CALLBACK_TIMEOUT_MS = 30000L // 30 seconds
+    private const val CALLBACK_TIMEOUT_MS = 30000L
 
     private val gson = Gson()
     private val client = OkHttpClient.Builder()
@@ -28,11 +28,12 @@ object ChatWebSocketClient {
     private var webSocket: WebSocket? = null
     private var heartbeatJob: Job? = null
     private var reconnectJob: Job? = null
-    
+
     private val _connectionState = MutableStateFlow(false)
     val connectionState: StateFlow<Boolean> = _connectionState
 
-    private val _socketEvents = MutableSharedFlow<SocketResponse>(extraBufferCapacity = 100)
+    // 🔥 FIX: Buffer 100 → 500, messages drop nahi honge
+    private val _socketEvents = MutableSharedFlow<SocketResponse>(extraBufferCapacity = 500)
     val socketEvents: SharedFlow<SocketResponse> = _socketEvents
 
     private var userCode: String = ""
@@ -72,19 +73,17 @@ object ChatWebSocketClient {
                 try {
                     val jsonObject = gson.fromJson(text, JsonObject::class.java)
                     val type = jsonObject.get("type")?.asString ?: return
-                    
+
                     if (type == "ping" || type == "pong") return
 
                     if (jsonObject.has("cbId")) {
                         val cbId = jsonObject.get("cbId").asInt
-                        
                         val payloadElement = jsonObject.get("payload")
                         val payload = if (payloadElement != null && payloadElement.isJsonObject) {
                             payloadElement.asJsonObject
                         } else {
-                            jsonObject // Fallback
+                            jsonObject
                         }
-                        
                         finishCallback(cbId, payload)
                         return
                     }
@@ -97,11 +96,6 @@ object ChatWebSocketClient {
                     val payload = jsonObject.getAsJsonObject("payload")
                     var socketPayload = gson.fromJson(payload, SocketPayload::class.java)
 
-                    // ==========================================
-                    // FIX: JSON PARSING MISMATCH
-                    // Agar backend ne message ko "message" object me wrap nahi kiya hai (flat JSON bheja hai), 
-                    // toh use direct parse karke SocketPayload me daal do.
-                    // ==========================================
                     if (socketPayload.message == null && (payload.has("messageId") || payload.has("text") || payload.has("clientMessageId"))) {
                         val directMessage = gson.fromJson(payload, Message::class.java)
                         socketPayload = SocketPayload(
@@ -123,11 +117,15 @@ object ChatWebSocketClient {
                 Log.d(TAG, "Closing: $code / $reason")
                 webSocket.close(1000, null)
                 _connectionState.value = false
+                this@ChatWebSocketClient.webSocket = null  // 🔥 FIX
+                if (!isIntentionalDisconnect) scheduleReconnect()
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                Log.e(TAG, "Error: ${t.message}")
+                Log.d(TAG, "Error: ${t.message}")
                 _connectionState.value = false
+                this@ChatWebSocketClient.webSocket = null  // 🔥 FIX: null karo, warna reconnect nahi hoga
+                heartbeatJob?.cancel()
                 if (!isIntentionalDisconnect) {
                     scheduleReconnect()
                 }
@@ -142,7 +140,7 @@ object ChatWebSocketClient {
         webSocket?.close(1000, "User logged out")
         webSocket = null
         _connectionState.value = false
-        
+
         callbacks.forEach { (_, data) -> data.timeoutJob.cancel() }
         callbacks.clear()
     }
@@ -157,18 +155,33 @@ object ChatWebSocketClient {
         }
     }
 
+    // ==================================================
+    // 🔥 NEW: PUBLIC KEY UPLOAD (यही missing था!)
+    // ==================================================
+    fun registerPublicKey(publicKey: String, onResult: ((Boolean) -> Unit)? = null) {
+        val cbId = cbIdCounter.getAndIncrement()
+        val payload = JsonObject().apply { addProperty("publicKey", publicKey) }
+        val event = mapOf("type" to "register-public-key", "payload" to payload, "cbId" to cbId)
+
+        startCallbackTimeout(cbId) { json ->
+            val success = json?.get("success")?.takeIf { !it.isJsonNull }?.asBoolean ?: false
+            Log.d(TAG, "registerPublicKey result: $success")
+            onResult?.invoke(success)
+        }
+        webSocket?.send(gson.toJson(event))
+    }
+
+    // ==================================================
+    // EXISTING FUNCTIONS (जैसे थीं वैसी)
+    // ==================================================
+
     fun getMessages(targetCode: String, after: Long? = null, onResult: (JsonObject?) -> Unit) {
         val cbId = cbIdCounter.getAndIncrement()
         val payload = JsonObject().apply {
             addProperty("targetCode", targetCode)
-            if (after != null) {
-                addProperty("after", after)
-            } else {
-                add("after", JsonNull.INSTANCE)
-            }
+            if (after != null) addProperty("after", after) else add("after", JsonNull.INSTANCE)
         }
         val event = mapOf("type" to "get-messages", "payload" to payload, "cbId" to cbId)
-
         startCallbackTimeout(cbId, onResult)
         webSocket?.send(gson.toJson(event))
     }
@@ -177,7 +190,6 @@ object ChatWebSocketClient {
         val cbId = cbIdCounter.getAndIncrement()
         val payload = JsonObject()
         val event = mapOf("type" to "get-recent-chats", "payload" to payload, "cbId" to cbId)
-
         startCallbackTimeout(cbId, onResult)
         webSocket?.send(gson.toJson(event))
     }
@@ -186,7 +198,7 @@ object ChatWebSocketClient {
         val cbId = cbIdCounter.getAndIncrement()
         val payload = JsonObject().apply { addProperty("targetCode", targetCode) }
         val event = mapOf("type" to "get-public-key", "payload" to payload, "cbId" to cbId)
-        
+
         startCallbackTimeout(cbId) { json ->
             var pubKey: String? = null
             if (json != null) {
@@ -204,7 +216,6 @@ object ChatWebSocketClient {
     fun sendMessage(payload: SendMessagePayload, onResult: (JsonObject?) -> Unit) {
         val cbId = cbIdCounter.getAndIncrement()
         val event = mapOf("type" to "send-message", "payload" to payload, "cbId" to cbId)
-        
         startCallbackTimeout(cbId, onResult)
         webSocket?.send(gson.toJson(event))
     }
@@ -238,7 +249,6 @@ object ChatWebSocketClient {
                 withContext(Dispatchers.Main) { onResult(null) }
             }
         }
-        
         val callbackData = CallbackData(
             onResult = { payload -> scope.launch { withContext(Dispatchers.Main) { onResult(payload) } } },
             timeoutJob = timeoutJob
